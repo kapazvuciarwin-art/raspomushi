@@ -147,9 +147,14 @@
             padding: 2px 4px;
             border-radius: 4px;
             transition: background 0.2s;
+            display: inline;
         }
         .lyric-word:hover {
             background: rgba(170,204,255,0.2);
+        }
+        .lyric-full {
+            word-break: keep-all;
+            white-space: pre-wrap;
         }
         .search-box {
             margin-bottom: 20px;
@@ -422,7 +427,20 @@
                 
                 // 斷詞並顯示
                 const segmentedContent = await segmentAndRenderLyric(lyric.content);
-                document.getElementById('lyric-detail-content').innerHTML = segmentedContent;
+                const detailContentEl = document.getElementById('lyric-detail-content');
+                detailContentEl.innerHTML = segmentedContent;
+                
+                // 綁定點擊事件（使用事件委派，確保動態添加的元素也能響應）
+                detailContentEl.addEventListener('click', function handleWordClick(ev) {
+                    const wordEl = ev.target.closest('.lyric-word');
+                    if (wordEl) {
+                        const word = wordEl.getAttribute('data-word');
+                        if (word) {
+                            ev.stopPropagation();
+                            showFuriganaAt(ev.clientX, ev.clientY, word);
+                        }
+                    }
+                }, { once: false });
                 
                 document.getElementById('list-tab').classList.remove('active');
                 document.getElementById('lyric-detail-card').style.display = 'block';
@@ -467,30 +485,22 @@
                     return escapeHtml(text);
                 }
                 
-                // 將斷詞結果渲染成可點擊的單字
+                // 將斷詞結果渲染成可點擊的單字（不加空格）
                 let html = '';
                 for (const segment of data.segments) {
                     if (segment === '\n') {
                         html += '<br>';
                     } else if (segment.trim() && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(segment)) {
-                        // 包含日文字元，做成可點擊
+                        // 包含日文字元，做成可點擊（不加空格）
                         html += `<span class="lyric-word" data-word="${escapeHtml(segment)}">${escapeHtml(segment)}</span>`;
-                    } else {
+                    } else if (segment.trim()) {
+                        // 其他字元（標點符號等）也不加空格
                         html += escapeHtml(segment);
                     }
+                    // 完全空白的 segment 跳過，不渲染
                 }
                 
-                // 綁定點擊事件
-                setTimeout(() => {
-                    document.querySelectorAll('.lyric-word').forEach(el => {
-                        el.addEventListener('click', (ev) => {
-                            const word = ev.target.getAttribute('data-word');
-                            if (word) {
-                                showFuriganaAt(ev.clientX, ev.clientY, word);
-                            }
-                        });
-                    });
-                }, 100);
+                return html;
                 
                 return html;
             } catch (error) {
@@ -529,7 +539,12 @@
                     return;
                 }
                 currentReading = (data.reading || '').trim() || '無';
-                furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(currentReading)})</span>`;
+                // 確保假名正確顯示
+                if (currentReading && currentReading !== '無') {
+                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(currentReading)})</span>`;
+                } else {
+                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(無讀音)</span>`;
+                }
             } catch (e) {
                 if (e.name === 'AbortError') return;
                 furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(查詢失敗)</span>`;

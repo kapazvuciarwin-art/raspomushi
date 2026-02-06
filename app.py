@@ -89,11 +89,12 @@ def segment_japanese_text(text: str) -> list:
             if word:
                 segments.append(word)
         
-        # 添加分隔符（空白、標點、換行）
+        # 添加分隔符（只保留換行和標點，空白不作為獨立 segment）
         if match.group(1):  # 空白或標點
             if match.group(1) == '\n':
                 segments.append('\n')
-            elif match.group(1).strip():
+            elif match.group(1).strip() and match.group(1) not in ' \t':
+                # 只保留標點符號，不保留空白
                 segments.append(match.group(1))
         elif match.group(2) or match.group(3):  # 助詞或動詞變化
             # 將助詞/動詞變化作為單獨的詞
@@ -249,7 +250,10 @@ def get_furigana():
         return jsonify({'ok': False, 'error': 'missing text'}), 400
     
     reading = to_furigana(text)
-    return jsonify({'ok': True, 'text': text, 'reading': reading})
+    # 確保 JSON 響應使用 UTF-8 編碼
+    response = jsonify({'ok': True, 'text': text, 'reading': reading})
+    response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    return response
 
 
 @app.route('/api/segment', methods=['POST'])
