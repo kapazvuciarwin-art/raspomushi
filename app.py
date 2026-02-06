@@ -1,0 +1,372 @@
+"""rasporuno - 日文歌詞資料庫，支援斷詞、假名顯示、關鍵字搜尋，並可加入 rasword 單字庫"""
+
+import os
+import re
+import sqlite3
+from datetime import datetime
+from urllib.parse import quote
+
+import requests
+from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request
+
+load_dotenv()
+
+app = Flask(__name__)
+DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rasporuno.db")
+
+# rasword 單字庫服務：預設跑在本機 5000 port，可用環境變數覆蓋
+RASWORD_BASE_URL = os.getenv("RASWORD_BASE_URL", "http://127.0.0.1:5000")
+
+_KAKASI = None
+
+
+def to_furigana(text: str) -> str:
+    """
+    將日文（含漢字）轉成假名（平假名為主）。
+    """
+    global _KAKASI
+    if not text:
+        return ""
+    if _KAKASI is None:
+        from pykakasi import kakasi  # lazy import，避免沒裝時影響其他功能
+
+        k = kakasi()
+        k.setMode("J", "H")  # Kanji -> Hiragana
+        k.setMode("K", "H")  # Katakana -> Hiragana
+        k.setMode("H", "H")  # Hiragana -> Hiragana
+        k.setMode("r", "Hepburn")  # not used, but keeps default stable
+        _KAKASI = k.getConverter()
+    return (_KAKASI.do(text) or "").strip()
+
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lyrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def segment_japanese_text(text: str) -> list:
+    """
+    簡單的日文斷詞（以空白、標點符號分割，保留日文字元）。
+    更精確的斷詞可以使用 janome 或 mecab，這裡先用簡單方式。
+    """
+    if not text:
+        return []
+    
+    # 移除多餘空白，但保留換行
+    text = re.sub(r'[ \t]+', ' ', text)
+    
+    # 分割：空白、標點符號、但保留日文字元組
+    # 日文字元範圍：ひらがな、カタカナ、漢字
+    segments = []
+    current = ""
+    
+    for char in text:
+        if char.isspace() or char in '，。、！？；：':
+            if current:
+                segments.append(current)
+                current = ""
+            if char == '\n':
+                segments.append('\n')
+        elif re.match(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]', char):
+            # 日文字元
+            current += char
+        else:
+            # 其他字元（英文、數字等）
+            if current:
+                segments.append(current)
+                current = ""
+            if char.strip():
+                segments.append(char)
+    
+    if current:
+        segments.append(current)
+    
+    return segments
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/api/lyrics', methods=['GET'])
+def get_lyrics():
+    """取得所有歌詞列表，支援關鍵字搜尋"""
+    keyword = request.args.get('keyword', '').strip()
+    conn = get_db()
+    
+    if keyword:
+        # 關鍵字搜尋：在標題或內容中搜尋
+        lyrics = conn.execute("""
+            SELECT * FROM lyrics 
+            WHERE title LIKE ? OR content LIKE ?
+            ORDER BY updated_at DESC
+        """, (f'%{keyword}%', f'%{keyword}%')).fetchall()
+    else:
+        lyrics = conn.execute("""
+            SELECT * FROM lyrics 
+            ORDER BY updated_at DESC
+        """).fetchall()
+    
+    conn.close()
+    return jsonify([dict(l) for l in lyrics])
+
+
+@app.route('/api/lyrics', methods=['POST'])
+def add_lyric():
+    """新增單首歌詞"""
+    data = request.get_json() or {}
+    title = (data.get('title') or '').strip()
+    content = (data.get('content') or '').strip()
+    
+    if not title or not content:
+        return jsonify({'success': False, 'error': '標題和歌詞內容不能為空'}), 400
+    
+    now = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO lyrics (title, content, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+    """, (title, content, now, now))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/lyrics/batch', methods=['POST'])
+def batch_add_lyrics():
+    """批次新增歌詞"""
+    data = request.get_json() or {}
+    batch_text = (data.get('batch_text') or '').strip()
+    
+    if not batch_text:
+        return jsonify({'success': False, 'error': '批次資料不能為空'}), 400
+    
+    # 解析批次格式：=== 歌名1.txt ===\n歌詞內容\n\n=== 歌名2.txt ===\n歌詞內容
+    pattern = r'=== (.+?)\.txt ===\s*\n(.*?)(?=\n=== |$)'
+    matches = re.findall(pattern, batch_text, re.DOTALL)
+    
+    if not matches:
+        return jsonify({'success': False, 'error': '無法解析批次格式，請確認格式為：=== 歌名.txt ===\\n歌詞內容'}), 400
+    
+    now = datetime.now().isoformat()
+    conn = get_db()
+    success_count = 0
+    errors = []
+    
+    for title, content in matches:
+        title = title.strip()
+        content = content.strip()
+        
+        if not title or not content:
+            errors.append({'title': title or '(無標題)', 'error': '標題或內容為空'})
+            continue
+        
+        try:
+            conn.execute("""
+                INSERT INTO lyrics (title, content, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+            """, (title, content, now, now))
+            success_count += 1
+        except Exception as e:
+            errors.append({'title': title, 'error': str(e)})
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'count': success_count,
+        'errors': errors
+    })
+
+
+@app.route('/api/lyrics/<int:lyric_id>', methods=['GET'])
+def get_lyric(lyric_id):
+    """取得單首歌詞詳情"""
+    conn = get_db()
+    lyric = conn.execute("""
+        SELECT * FROM lyrics WHERE id = ?
+    """, (lyric_id,)).fetchone()
+    conn.close()
+    
+    if not lyric:
+        return jsonify({'error': '找不到歌詞'}), 404
+    
+    return jsonify(dict(lyric))
+
+
+@app.route('/api/lyrics/<int:lyric_id>', methods=['DELETE'])
+def delete_lyric(lyric_id):
+    """刪除歌詞"""
+    conn = get_db()
+    conn.execute("DELETE FROM lyrics WHERE id = ?", (lyric_id,))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/furigana', methods=['GET'])
+def get_furigana():
+    """取得日文詞的假名讀音"""
+    text = request.args.get('text', '').strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'missing text'}), 400
+    
+    reading = to_furigana(text)
+    return jsonify({'ok': True, 'text': text, 'reading': reading})
+
+
+@app.route('/api/segment', methods=['POST'])
+def segment_text():
+    """將日文文本斷詞"""
+    data = request.get_json() or {}
+    text = (data.get('text') or '').strip()
+    
+    if not text:
+        return jsonify({'ok': False, 'error': 'missing text'}), 400
+    
+    segments = segment_japanese_text(text)
+    return jsonify({'ok': True, 'segments': segments})
+
+
+@app.route('/api/rasword/add-word', methods=['POST'])
+def api_rasword_add_word():
+    """
+    將歌詞中點擊到的日文詞，透過 rasword 服務
+    （先檢查是否已存在，如無則呼叫 AI 生成並寫入 rasword 的資料庫）。
+    """
+    data = request.get_json() or {}
+    word = (data.get("word") or "").strip()
+    if not word:
+        return jsonify({"ok": False, "error": "missing word"}), 400
+
+    base = (RASWORD_BASE_URL or "").rstrip("/")
+    if not base:
+        return jsonify({"ok": False, "error": "RASWORD_BASE_URL 未設定"}), 500
+
+    # 1) 先檢查 rasword 是否已存在該單字
+    try:
+        check_resp = requests.post(
+            f"{base}/api/words/check",
+            json={"japanese_word": word},
+            timeout=15,
+        )
+        if check_resp.status_code == 200:
+            payload = check_resp.json()
+            if payload.get("exists"):
+                w = payload.get("word") or {}
+                brief = {
+                    "japanese_word": w.get("japanese_word") or word,
+                    "kana_form": w.get("kana_form") or "",
+                    "kanji_form": w.get("kanji_form") or "",
+                    "chinese_short": w.get("chinese_short") or "",
+                    "chinese_meaning": "",
+                }
+                return jsonify(
+                    {"ok": True, "exists": True, "created": False, "word": brief}
+                )
+    except Exception as e:
+        # 檢查失敗不致命，繼續嘗試生成
+        print(f"[rasporuno] rasword /api/words/check 失敗: {e}")
+
+    # 2) 呼叫 rasword 的 /api/generate，用 rasword 內建的 GEMINI_API_KEY
+    try:
+        gen_resp = requests.post(
+            f"{base}/api/generate",
+            json={"japanese_word": word, "api_provider": "gemini"},
+            timeout=90,
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"呼叫 rasword /api/generate 失敗: {e}"}), 502
+
+    try:
+        gen_data = gen_resp.json()
+    except Exception:
+        gen_data = {}
+
+    if not gen_resp.ok or gen_data.get("error"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": gen_data.get("error")
+                    or f"rasword /api/generate 失敗（HTTP {gen_resp.status_code}）",
+                }
+            ),
+            502,
+        )
+
+    # 3) 將生成結果寫入 rasword 的 /api/words
+    add_payload = {
+        "japanese_word": word,
+        "part_of_speech": gen_data.get("part_of_speech", ""),
+        "sentence1": gen_data.get("sentence1", ""),
+        "sentence2": gen_data.get("sentence2", ""),
+        "chinese_meaning": gen_data.get("chinese_meaning", ""),
+        "chinese_short": gen_data.get("chinese_short", ""),
+        "jlpt_level": gen_data.get("jlpt_level", ""),
+        "kana_form": gen_data.get("kana_form", ""),
+        "kanji_form": gen_data.get("kanji_form", ""),
+        "common_form": gen_data.get("common_form", "kanji"),
+        "source": "lyrics",  # 從歌詞新增
+    }
+
+    try:
+        add_resp = requests.post(
+            f"{base}/api/words",
+            json=add_payload,
+            timeout=30,
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"呼叫 rasword /api/words 失敗: {e}"}), 502
+
+    try:
+        add_json = add_resp.json()
+    except Exception:
+        add_json = {}
+
+    if not add_resp.ok or not add_json.get("success"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": add_json.get("error")
+                    or f"rasword /api/words 新增失敗（HTTP {add_resp.status_code}）",
+                }
+            ),
+            502,
+        )
+
+    brief = {
+        "japanese_word": word,
+        "kana_form": gen_data.get("kana_form", ""),
+        "kanji_form": gen_data.get("kanji_form", ""),
+        "chinese_short": gen_data.get("chinese_short", ""),
+        "chinese_meaning": gen_data.get("chinese_meaning", ""),
+    }
+    return jsonify({"ok": True, "exists": False, "created": True, "word": brief})
+
+
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=5002, debug=True)

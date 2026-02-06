@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rasporuno － 日文歌詞資料庫</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+            background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e8e8e8;
+            padding: 24px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            margin-bottom: 24px;
+            font-weight: 700;
+            color: #eee;
+        }
+        .card {
+            background: rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .card h2 {
+            margin-bottom: 16px;
+            font-size: 1.1rem;
+            color: #aaccff;
+        }
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #bbb;
+            font-size: 0.9rem;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            color: #fff;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+        .form-group textarea {
+            min-height: 200px;
+            resize: vertical;
+        }
+        .form-group input::placeholder, .form-group textarea::placeholder {
+            color: #888;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+            color: #fff;
+        }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-secondary { background: #495057; color: #fff; }
+        .btn-danger { background: #dc3545; color: #fff; }
+        .btn-success { background: #28a745; color: #fff; }
+        .btn-small { padding: 6px 12px; font-size: 0.85rem; }
+        .msg { padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+        .msg.error { background: rgba(220,53,69,0.2); color: #f8a0a0; }
+        .msg.success { background: rgba(40,167,69,0.2); color: #90ee90; }
+        .msg.info { background: rgba(0,120,255,0.15); color: #aaccff; }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            background: transparent;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 0.95rem;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+        .tab-btn.active {
+            color: #aaccff;
+            border-bottom-color: #aaccff;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .lyrics-list {
+            list-style: none;
+        }
+        .lyrics-list li {
+            padding: 14px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .lyrics-list li:last-child { border-bottom: none; }
+        .lyric-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #ddd;
+            font-size: 1.1rem;
+        }
+        .lyric-date {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .lyric-preview {
+            font-size: 0.9rem;
+            color: #aaa;
+            max-height: 4em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .lyric-full {
+            white-space: pre-wrap;
+            line-height: 1.8;
+            padding: 20px;
+            background: rgba(0,0,0,0.25);
+            border-radius: 8px;
+            margin-top: 12px;
+            color: #e0e0e0;
+            font-size: 1rem;
+        }
+        .lyric-word {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .lyric-word:hover {
+            background: rgba(170,204,255,0.2);
+        }
+        .search-box {
+            margin-bottom: 20px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            color: #fff;
+            font-size: 1rem;
+        }
+        .furigana-pop {
+            position: fixed;
+            z-index: 9999;
+            display: none;
+            max-width: min(420px, 85vw);
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(10, 12, 18, 0.92);
+            border: 1px solid rgba(255,255,255,0.14);
+            color: #eaeaea;
+            font-size: 0.95rem;
+            line-height: 1.2;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+            backdrop-filter: blur(6px);
+        }
+        .furigana-pop .w { color: #bcd7ff; font-weight: 700; }
+        .furigana-pop .r { color: #eaeaea; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 rasporuno － 日文歌詞資料庫</h1>
+        <p style="text-align: center; color: #888; margin-bottom: 24px;">
+            輸入日文歌詞，支援斷詞、假名顯示，並可將單字加入 rasword 單字庫
+        </p>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('add')">新增歌詞</button>
+            <button class="tab-btn" onclick="switchTab('batch')">批次匯入</button>
+            <button class="tab-btn" onclick="switchTab('list')">歌詞列表</button>
+        </div>
+
+        <!-- 新增歌詞頁面 -->
+        <div id="add-tab" class="tab-content active">
+            <div class="card">
+                <h2>📝 新增單首歌詞</h2>
+                <div id="add-msg"></div>
+                <form id="lyric-form">
+                    <div class="form-group">
+                        <label>歌名</label>
+                        <input type="text" id="lyric-title" placeholder="輸入歌名" required>
+                    </div>
+                    <div class="form-group">
+                        <label>歌詞內容</label>
+                        <textarea id="lyric-content" placeholder="輸入歌詞內容" required></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">新增歌詞</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 批次匯入頁面 -->
+        <div id="batch-tab" class="tab-content">
+            <div class="card">
+                <h2>📦 批次匯入歌詞</h2>
+                <div id="batch-msg"></div>
+                <div class="form-group">
+                    <label>批次資料格式：</label>
+                    <pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; color: #aaa; font-size: 0.85rem; margin-bottom: 12px;">
+=== 歌名1.txt ===
+歌詞內容
+
+=== 歌名2.txt ===
+歌詞內容</pre>
+                </div>
+                <div class="form-group">
+                    <label>批次資料</label>
+                    <textarea id="batch-input" placeholder="貼上批次資料" style="min-height: 300px;"></textarea>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="batchImport()">批次匯入</button>
+            </div>
+        </div>
+
+        <!-- 歌詞列表頁面 -->
+        <div id="list-tab" class="tab-content">
+            <div class="card">
+                <h2>📋 歌詞列表</h2>
+                <div class="search-box">
+                    <input type="text" id="search-keyword" placeholder="搜尋歌名或歌詞內容..." onkeyup="searchLyrics()">
+                </div>
+                <div id="lyrics-list-container">
+                    <p style="color: #888; text-align: center;">載入中...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 歌詞詳情頁面（動態顯示） -->
+        <div id="lyric-detail-card" class="card" style="display: none;">
+            <h2 id="lyric-detail-title"></h2>
+            <div class="lyric-date" id="lyric-detail-date"></div>
+            <div class="lyric-full" id="lyric-detail-content"></div>
+            <button class="btn btn-secondary" onclick="hideLyricDetail()" style="margin-top: 12px;">返回列表</button>
+        </div>
+    </div>
+
+    <div id="furigana-pop" class="furigana-pop" role="status" aria-live="polite"></div>
+
+    <script>
+        const furiganaPop = document.getElementById('furigana-pop');
+        let furiganaAbort = null;
+        let currentWord = null;
+        let currentReading = null;
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+            
+            if (tab === 'list') {
+                loadLyricsList();
+            }
+        }
+
+        // 新增歌詞表單
+        document.getElementById('lyric-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const msgEl = document.getElementById('add-msg');
+            const title = document.getElementById('lyric-title').value.trim();
+            const content = document.getElementById('lyric-content').value.trim();
+            
+            if (!title || !content) {
+                msgEl.innerHTML = '<div class="msg error">請填寫歌名和歌詞內容</div>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/lyrics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, content })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    msgEl.innerHTML = '<div class="msg success">✅ 歌詞新增成功！</div>';
+                    document.getElementById('lyric-form').reset();
+                    setTimeout(() => {
+                        msgEl.innerHTML = '';
+                        switchTab('list');
+                    }, 1500);
+                } else {
+                    msgEl.innerHTML = `<div class="msg error">❌ ${result.error || '新增失敗'}</div>`;
+                }
+            } catch (error) {
+                msgEl.innerHTML = `<div class="msg error">❌ 新增失敗：${error.message}</div>`;
+            }
+        });
+
+        // 批次匯入
+        async function batchImport() {
+            const msgEl = document.getElementById('batch-msg');
+            const batchText = document.getElementById('batch-input').value.trim();
+            
+            if (!batchText) {
+                msgEl.innerHTML = '<div class="msg error">請輸入批次資料</div>';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/lyrics/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batch_text: batchText })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    let html = `<div class="msg success">✅ 成功匯入 ${result.count} 首歌詞！</div>`;
+                    if (result.errors && result.errors.length > 0) {
+                        html += `<div class="msg error">⚠️ ${result.errors.length} 首失敗：<ul>`;
+                        result.errors.forEach(err => {
+                            html += `<li>${escapeHtml(err.title)}: ${escapeHtml(err.error)}</li>`;
+                        });
+                        html += '</ul></div>';
+                    }
+                    msgEl.innerHTML = html;
+                    document.getElementById('batch-input').value = '';
+                    setTimeout(() => {
+                        switchTab('list');
+                    }, 2000);
+                } else {
+                    msgEl.innerHTML = `<div class="msg error">❌ ${result.error || '匯入失敗'}</div>`;
+                }
+            } catch (error) {
+                msgEl.innerHTML = `<div class="msg error">❌ 匯入失敗：${error.message}</div>`;
+            }
+        }
+
+        // 載入歌詞列表
+        async function loadLyricsList(keyword = '') {
+            const container = document.getElementById('lyrics-list-container');
+            container.innerHTML = '<p style="color: #888; text-align: center;">載入中...</p>';
+            
+            try {
+                const url = keyword ? `/api/lyrics?keyword=${encodeURIComponent(keyword)}` : '/api/lyrics';
+                const response = await fetch(url);
+                const lyrics = await response.json();
+                
+                if (lyrics.length === 0) {
+                    container.innerHTML = '<p style="color: #888; text-align: center;">目前沒有歌詞</p>';
+                    return;
+                }
+                
+                let html = '<ul class="lyrics-list">';
+                for (const lyric of lyrics) {
+                    const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
+                    const preview = lyric.content.substring(0, 100) + (lyric.content.length > 100 ? '...' : '');
+                    html += `
+                        <li>
+                            <div class="lyric-title">${escapeHtml(lyric.title)}</div>
+                            <div class="lyric-date">${date}</div>
+                            <div class="lyric-preview">${escapeHtml(preview)}</div>
+                            <div style="margin-top: 8px;">
+                                <button class="btn btn-primary btn-small" onclick="showLyricDetail(${lyric.id})">查看詳情</button>
+                                <button class="btn btn-danger btn-small" onclick="deleteLyric(${lyric.id})">刪除</button>
+                            </div>
+                        </li>
+                    `;
+                }
+                html += '</ul>';
+                container.innerHTML = html;
+            } catch (error) {
+                container.innerHTML = `<p style="color: #f8a0a0; text-align: center;">載入失敗：${error.message}</p>`;
+            }
+        }
+
+        // 搜尋歌詞
+        function searchLyrics() {
+            const keyword = document.getElementById('search-keyword').value.trim();
+            loadLyricsList(keyword);
+        }
+
+        // 顯示歌詞詳情
+        async function showLyricDetail(id) {
+            try {
+                const response = await fetch(`/api/lyrics/${id}`);
+                const lyric = await response.json();
+                
+                if (!response.ok) {
+                    alert('載入失敗：' + (lyric.error || '未知錯誤'));
+                    return;
+                }
+                
+                document.getElementById('lyric-detail-title').textContent = lyric.title;
+                const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
+                document.getElementById('lyric-detail-date').textContent = `更新時間：${date}`;
+                
+                // 斷詞並顯示
+                const segmentedContent = await segmentAndRenderLyric(lyric.content);
+                document.getElementById('lyric-detail-content').innerHTML = segmentedContent;
+                
+                document.getElementById('list-tab').classList.remove('active');
+                document.getElementById('lyric-detail-card').style.display = 'block';
+            } catch (error) {
+                alert('載入失敗：' + error.message);
+            }
+        }
+
+        // 隱藏歌詞詳情
+        function hideLyricDetail() {
+            document.getElementById('lyric-detail-card').style.display = 'none';
+            document.getElementById('list-tab').classList.add('active');
+        }
+
+        // 刪除歌詞
+        async function deleteLyric(id) {
+            if (!confirm('確定要刪除這首歌詞嗎？')) return;
+            
+            try {
+                const response = await fetch(`/api/lyrics/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    loadLyricsList(document.getElementById('search-keyword').value.trim());
+                } else {
+                    alert('刪除失敗');
+                }
+            } catch (error) {
+                alert('刪除失敗：' + error.message);
+            }
+        }
+
+        // 斷詞並渲染歌詞
+        async function segmentAndRenderLyric(text) {
+            try {
+                const response = await fetch('/api/segment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const data = await response.json();
+                
+                if (!data.ok || !data.segments) {
+                    return escapeHtml(text);
+                }
+                
+                // 將斷詞結果渲染成可點擊的單字
+                let html = '';
+                for (const segment of data.segments) {
+                    if (segment === '\n') {
+                        html += '<br>';
+                    } else if (segment.trim() && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(segment)) {
+                        // 包含日文字元，做成可點擊
+                        html += `<span class="lyric-word" data-word="${escapeHtml(segment)}">${escapeHtml(segment)}</span>`;
+                    } else {
+                        html += escapeHtml(segment);
+                    }
+                }
+                
+                // 綁定點擊事件
+                setTimeout(() => {
+                    document.querySelectorAll('.lyric-word').forEach(el => {
+                        el.addEventListener('click', (ev) => {
+                            const word = ev.target.getAttribute('data-word');
+                            if (word) {
+                                showFuriganaAt(ev.clientX, ev.clientY, word);
+                            }
+                        });
+                    });
+                }, 100);
+                
+                return html;
+            } catch (error) {
+                console.error('斷詞失敗:', error);
+                return escapeHtml(text);
+            }
+        }
+
+        // 顯示假名彈窗
+        function hideFurigana() {
+            if (furiganaAbort) {
+                furiganaAbort.abort();
+                furiganaAbort = null;
+            }
+            furiganaPop.style.display = 'none';
+            currentWord = null;
+            currentReading = null;
+            furiganaPop.removeAttribute('data-mode');
+        }
+
+        async function showFuriganaAt(x, y, word) {
+            if (!word) return;
+            hideFurigana();
+            currentWord = word;
+            furiganaPop.style.left = Math.min(x + 12, window.innerWidth - 30) + 'px';
+            furiganaPop.style.top = Math.min(y + 8, window.innerHeight - 30) + 'px';
+            furiganaPop.style.display = 'block';
+            furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(…)</span>`;
+
+            furiganaAbort = new AbortController();
+            try {
+                const res = await fetch('/api/furigana?text=' + encodeURIComponent(word), { signal: furiganaAbort.signal });
+                const data = await res.json();
+                if (!data || !data.ok) {
+                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(查詢失敗)</span>`;
+                    return;
+                }
+                currentReading = (data.reading || '').trim() || '無';
+                furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(currentReading)})</span>`;
+            } catch (e) {
+                if (e.name === 'AbortError') return;
+                furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(查詢失敗)</span>`;
+            }
+        }
+
+        // 新增單字到 rasword
+        async function addCurrentWordToRasword() {
+            const addAreaId = 'furigana-add-status';
+            let statusEl = document.getElementById(addAreaId);
+            if (!currentWord) return;
+            if (!statusEl) {
+                statusEl = document.createElement('div');
+                statusEl.id = addAreaId;
+                statusEl.style.marginTop = '6px';
+                statusEl.style.fontSize = '0.85rem';
+                furiganaPop.appendChild(statusEl);
+            }
+            statusEl.innerHTML = '⏳ 處理中...';
+            
+            try {
+                const res = await fetch('/api/rasword/add-word', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ word: currentWord })
+                });
+                const data = await res.json();
+                
+                if (data.ok) {
+                    if (data.exists) {
+                        statusEl.innerHTML = '✅ 已存在於單字庫';
+                    } else if (data.created) {
+                        statusEl.innerHTML = '✅ 已新增到單字庫';
+                    } else {
+                        statusEl.innerHTML = '✅ 完成';
+                    }
+                } else {
+                    statusEl.innerHTML = `❌ ${data.error || '失敗'}`;
+                }
+            } catch (e) {
+                statusEl.innerHTML = `❌ 錯誤：${e.message}`;
+            }
+        }
+
+        // 點擊假名彈窗：詢問是否新增到 rasword
+        furiganaPop.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (!currentWord) return;
+            const mode = furiganaPop.getAttribute('data-mode') || 'reading';
+            if (mode === 'reading') {
+                const reading = currentReading || '…';
+                furiganaPop.setAttribute('data-mode', 'confirm');
+                furiganaPop.innerHTML = `
+                    <div>
+                        <div class="w">${escapeHtml(currentWord)}</div>
+                        <div class="r">(${escapeHtml(reading)})</div>
+                        <div style="margin-top:4px;font-size:0.85rem;color:#ccc;">要新增到 rasword 單字庫嗎？</div>
+                        <div style="margin-top:6px;display:flex;gap:8px;">
+                            <button type="button" data-choice="y" style="padding:4px 10px;border-radius:6px;border:none;background:#22c55e;color:#fff;cursor:pointer;">y</button>
+                            <button type="button" data-choice="n" style="padding:4px 10px;border-radius:6px;border:none;background:#6b7280;color:#fff;cursor:pointer;">n</button>
+                        </div>
+                        <div id="furigana-add-status" style="margin-top:6px;font-size:0.8rem;"></div>
+                    </div>
+                `;
+                return;
+            }
+            const target = ev.target;
+            if (target && target.dataset && target.dataset.choice) {
+                const choice = target.dataset.choice;
+                if (choice === 'y') {
+                    addCurrentWordToRasword();
+                } else if (choice === 'n') {
+                    hideFurigana();
+                }
+            }
+        });
+
+        // 點擊其他地方隱藏彈窗
+        document.addEventListener('click', (ev) => {
+            if (!furiganaPop.contains(ev.target)) {
+                hideFurigana();
+            }
+        });
+
+        // 頁面載入時載入列表
+        document.addEventListener('DOMContentLoaded', () => {
+            loadLyricsList();
+        });
+    </script>
+</body>
+</html>
