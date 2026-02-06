@@ -66,13 +66,12 @@ def segment_japanese_text(text: str) -> list:
     簡單的日文斷詞（以空白、標點符號分割，保留日文字元）。
     更精確的斷詞可以使用 janome 或 mecab，這裡先用簡單方式。
     會嘗試在助詞、動詞變化等位置分割，讓單字更容易點擊。
+    保留原始空格和換行，空格會在前端轉換為換行顯示。
     """
     if not text:
         return []
     
-    # 移除多餘空白，但保留換行
-    text = re.sub(r'[ \t]+', ' ', text)
-    
+    # 保留原始空格和換行，不進行任何空白處理
     # 日文助詞和常見分割點
     # 助詞：は、が、を、に、で、と、から、まで、より、へ、の、も、など
     # 動詞變化：ます、です、だ、である、て、た、だ、など
@@ -89,12 +88,16 @@ def segment_japanese_text(text: str) -> list:
             if word:
                 segments.append(word)
         
-        # 添加分隔符（只保留換行和標點，空白不作為獨立 segment）
-        if match.group(1):  # 空白或標點
+        # 添加分隔符（保留所有空白、換行和標點）
+        if match.group(1):  # 空白、換行或標點
             if match.group(1) == '\n':
                 segments.append('\n')
-            elif match.group(1).strip() and match.group(1) not in ' \t':
-                # 只保留標點符號，不保留空白
+            elif match.group(1) in ' \t':
+                # 空格和 tab：標記為特殊字串，前端會轉換為換行
+                # 使用特殊標記 '__SPACE__' 以便前端識別
+                segments.append('__SPACE__')
+            elif match.group(1).strip():
+                # 標點符號
                 segments.append(match.group(1))
         elif match.group(2) or match.group(3):  # 助詞或動詞變化
             # 將助詞/動詞變化作為單獨的詞
@@ -112,7 +115,7 @@ def segment_japanese_text(text: str) -> list:
     if not segments:
         segments = [text]
     
-    # 過濾空字串
+    # 過濾空字串（但保留空格標記）
     segments = [s for s in segments if s]
     
     return segments

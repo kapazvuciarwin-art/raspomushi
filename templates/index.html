@@ -133,7 +133,6 @@
             text-overflow: ellipsis;
         }
         .lyric-full {
-            white-space: pre-wrap;
             line-height: 1.8;
             padding: 20px;
             background: rgba(0,0,0,0.25);
@@ -141,6 +140,10 @@
             margin-top: 12px;
             color: #e0e0e0;
             font-size: 1rem;
+            word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            white-space: pre-line; /* 保留換行，將連續空格視為一個空格 */
         }
         .lyric-word {
             cursor: pointer;
@@ -151,10 +154,6 @@
         }
         .lyric-word:hover {
             background: rgba(170,204,255,0.2);
-        }
-        .lyric-full {
-            word-break: keep-all;
-            white-space: pre-wrap;
         }
         .search-box {
             margin-bottom: 20px;
@@ -616,30 +615,35 @@
                 const data = await response.json();
                 
                 if (!data.ok || !data.segments) {
-                    return escapeHtml(text);
+                    // 如果斷詞失敗，直接處理原始文字：將空格轉換為換行
+                    return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
                 }
                 
-                // 將斷詞結果渲染成可點擊的單字（不加空格）
+                // 將斷詞結果渲染成可點擊的單字
+                // 空格會轉換為換行，保持原始格式
                 let html = '';
                 for (const segment of data.segments) {
                     if (segment === '\n') {
+                        // 換行符號
+                        html += '<br>';
+                    } else if (segment === '__SPACE__') {
+                        // 空格標記：轉換為換行（使用者輸入的空格當作斷行）
                         html += '<br>';
                     } else if (segment.trim() && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(segment)) {
-                        // 包含日文字元，做成可點擊（不加空格）
+                        // 包含日文字元，做成可點擊
                         html += `<span class="lyric-word" data-word="${escapeHtml(segment)}">${escapeHtml(segment)}</span>`;
                     } else if (segment.trim()) {
-                        // 其他字元（標點符號等）也不加空格
+                        // 其他字元（標點符號等）
                         html += escapeHtml(segment);
                     }
-                    // 完全空白的 segment 跳過，不渲染
+                    // 完全空白的 segment 跳過
                 }
-                
-                return html;
                 
                 return html;
             } catch (error) {
                 console.error('斷詞失敗:', error);
-                return escapeHtml(text);
+                // 錯誤時也將空格轉換為換行
+                return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
             }
         }
 
