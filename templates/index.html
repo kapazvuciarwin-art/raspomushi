@@ -143,7 +143,8 @@
             word-wrap: break-word;
             word-break: break-word;
             overflow-wrap: break-word;
-            white-space: pre-line; /* 保留換行，將連續空格視為一個空格 */
+            white-space: pre-wrap; /* 保留換行和空格，跟 rasrss 一樣 */
+            cursor: text; /* 顯示文字游標 */
         }
         /* 移除按鈕樣式，文字看起來完全正常 */
         .search-box {
@@ -436,21 +437,34 @@
                 // 斷詞並顯示（不包裝成按鈕，保持原始文字樣式）
                 const segmentedContent = await segmentAndRenderLyric(lyric.content);
                 const detailContentEl = document.getElementById('lyric-detail-content');
-                detailContentEl.innerHTML = segmentedContent;
+                
+                // 先移除舊的事件監聽器（如果有的話）
+                const newDetailContentEl = detailContentEl.cloneNode(true);
+                detailContentEl.parentNode.replaceChild(newDetailContentEl, detailContentEl);
+                
+                // 設置內容（使用 innerHTML 以支持 <br> 標籤）
+                newDetailContentEl.innerHTML = segmentedContent;
                 
                 // 綁定點擊事件（跟 rasrss 一樣的方式：直接在文字上點擊）
-                detailContentEl.addEventListener('click', function handleWordClick(ev) {
+                newDetailContentEl.addEventListener('click', function handleWordClick(ev) {
                     // 如果點擊的是假名彈窗，不處理
                     if (ev.target.closest('.furigana-pop')) return;
                     
+                    // 如果點擊的是按鈕或其他元素，不處理
+                    if (ev.target.tagName === 'BUTTON' || ev.target.closest('button')) return;
+                    
                     const range = caretRangeFromPoint(ev.clientX, ev.clientY);
                     if (!range) return;
+                    
                     const node = range.startContainer;
                     if (!node || node.nodeType !== Node.TEXT_NODE) return;
+                    
                     const word = pickWordFromTextNode(node.textContent || '', range.startOffset);
                     if (!word) return;
+                    
+                    ev.stopPropagation();
                     showFuriganaAt(ev.clientX, ev.clientY, word);
-                }, { once: false });
+                });
                 
                 document.getElementById('list-tab').classList.remove('active');
                 document.getElementById('lyric-detail-card').style.display = 'block';
@@ -612,7 +626,7 @@
                     return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
                 }
                 
-                // 將斷詞結果渲染成普通文字（不包裝成按鈕）
+                // 將斷詞結果渲染成 HTML（使用 <br> 換行）
                 // 空格會轉換為換行，保持原始格式
                 let html = '';
                 for (const segment of data.segments) {
@@ -623,7 +637,7 @@
                         // 空格標記：轉換為換行（使用者輸入的空格當作斷行）
                         html += '<br>';
                     } else {
-                        // 所有文字直接顯示，不包裝成 span
+                        // 所有文字直接顯示，不包裝成 span（使用 escapeHtml 防止 XSS）
                         html += escapeHtml(segment);
                     }
                 }
