@@ -242,6 +242,28 @@ def delete_lyric(lyric_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/lyrics/delete-all', methods=['POST'])
+def delete_all_lyrics():
+    """刪除全部歌詞（需要確認碼）"""
+    data = request.get_json() or {}
+    confirm_code = (data.get('confirm_code') or '').strip()
+    
+    # 確認碼必須是 "DELETE_ALL"
+    if confirm_code != 'DELETE_ALL':
+        return jsonify({'success': False, 'error': '確認碼錯誤'}), 400
+    
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM lyrics").fetchone()[0]
+    conn.execute("DELETE FROM lyrics")
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'deleted_count': count
+    })
+
+
 @app.route('/api/furigana', methods=['GET'])
 def get_furigana():
     """取得日文詞的假名讀音"""

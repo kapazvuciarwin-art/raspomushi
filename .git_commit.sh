@@ -3,4 +3,4 @@
 # 此檔案可隨時刪除，不影響專案運作
 cd /home/kapraspi/rasporuno
 git add -A
-git commit -m "Fix word segmentation spacing and improve furigana display event binding"
+git commit -m "Add delete all lyrics feature with multi-step confirmation"

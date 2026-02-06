@@ -245,11 +245,29 @@
         <div id="list-tab" class="tab-content">
             <div class="card">
                 <h2>📋 歌詞列表</h2>
-                <div class="search-box">
-                    <input type="text" id="search-keyword" placeholder="搜尋歌名或歌詞內容..." onkeyup="searchLyrics()">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div class="search-box" style="flex: 1; margin-bottom: 0;">
+                        <input type="text" id="search-keyword" placeholder="搜尋歌名或歌詞內容..." onkeyup="searchLyrics()">
+                    </div>
+                    <button class="btn btn-danger" onclick="confirmDeleteAll()" style="margin-left: 12px;">🗑️ 刪除全部</button>
                 </div>
                 <div id="lyrics-list-container">
                     <p style="color: #888; text-align: center;">載入中...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 刪除全部確認對話框 -->
+        <div id="delete-all-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
+            <div style="background: rgba(30,30,40,0.95); padding: 24px; border-radius: 12px; max-width: 500px; width: 90%; border: 1px solid rgba(255,255,255,0.1);">
+                <h3 style="color: #f8a0a0; margin-bottom: 16px;" id="delete-all-title">⚠️ 確認刪除全部歌詞</h3>
+                <div id="delete-all-content" style="color: #ddd; margin-bottom: 20px;"></div>
+                <div id="delete-all-input-area" style="display: none; margin-bottom: 16px;">
+                    <input type="text" id="delete-all-confirm-input" placeholder="請輸入 DELETE_ALL 確認" style="width: 100%; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: #fff;">
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button class="btn btn-secondary" onclick="cancelDeleteAll()">取消</button>
+                    <button class="btn btn-danger" id="delete-all-confirm-btn" onclick="proceedDeleteAll()">確認刪除</button>
                 </div>
             </div>
         </div>
@@ -470,6 +488,122 @@
                 alert('刪除失敗：' + error.message);
             }
         }
+        
+        // 刪除全部歌詞的多次確認機制
+        let deleteAllStep = 0;
+        
+        function confirmDeleteAll() {
+            deleteAllStep = 1;
+            const modal = document.getElementById('delete-all-modal');
+            const title = document.getElementById('delete-all-title');
+            const content = document.getElementById('delete-all-content');
+            const inputArea = document.getElementById('delete-all-input-area');
+            const confirmBtn = document.getElementById('delete-all-confirm-btn');
+            
+            // 第一步：顯示警告
+            title.textContent = '⚠️ 警告：此操作無法復原！';
+            content.innerHTML = `
+                <p>你即將刪除<strong style="color: #f8a0a0;">所有歌詞</strong>，此操作無法復原。</p>
+                <p style="margin-top: 12px;">請確認你真的要執行此操作。</p>
+            `;
+            inputArea.style.display = 'none';
+            confirmBtn.textContent = '我了解，繼續';
+            modal.style.display = 'flex';
+        }
+        
+        function proceedDeleteAll() {
+            const modal = document.getElementById('delete-all-modal');
+            const title = document.getElementById('delete-all-title');
+            const content = document.getElementById('delete-all-content');
+            const inputArea = document.getElementById('delete-all-input-area');
+            const confirmInput = document.getElementById('delete-all-confirm-input');
+            const confirmBtn = document.getElementById('delete-all-confirm-btn');
+            
+            if (deleteAllStep === 1) {
+                // 第二步：要求輸入確認碼
+                deleteAllStep = 2;
+                title.textContent = '⚠️ 請輸入確認碼';
+                content.innerHTML = `
+                    <p>為了確認你真的要刪除全部歌詞，請輸入確認碼：<strong style="color: #aaccff;">DELETE_ALL</strong></p>
+                `;
+                inputArea.style.display = 'block';
+                confirmInput.value = '';
+                confirmInput.focus();
+                confirmBtn.textContent = '確認刪除';
+            } else if (deleteAllStep === 2) {
+                // 第三步：驗證確認碼並執行刪除
+                const confirmCode = confirmInput.value.trim();
+                if (confirmCode !== 'DELETE_ALL') {
+                    alert('❌ 確認碼錯誤，請輸入 DELETE_ALL');
+                    confirmInput.value = '';
+                    confirmInput.focus();
+                    return;
+                }
+                
+                // 最後確認
+                if (!confirm('最後確認：你真的要刪除全部歌詞嗎？此操作無法復原！')) {
+                    return;
+                }
+                
+                // 執行刪除
+                executeDeleteAll();
+            }
+        }
+        
+        function cancelDeleteAll() {
+            deleteAllStep = 0;
+            document.getElementById('delete-all-modal').style.display = 'none';
+            document.getElementById('delete-all-confirm-input').value = '';
+        }
+        
+        async function executeDeleteAll() {
+            const modal = document.getElementById('delete-all-modal');
+            const content = document.getElementById('delete-all-content');
+            const confirmBtn = document.getElementById('delete-all-confirm-btn');
+            
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = '刪除中...';
+            content.innerHTML = '<p style="color: #aaa;">正在刪除全部歌詞...</p>';
+            
+            try {
+                const response = await fetch('/api/lyrics/delete-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm_code: 'DELETE_ALL' })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    content.innerHTML = `<p style="color: #90ee90;">✅ 已成功刪除 ${result.deleted_count || 0} 首歌詞</p>`;
+                    setTimeout(() => {
+                        modal.style.display = 'none';
+                        deleteAllStep = 0;
+                        loadLyricsList();
+                    }, 1500);
+                } else {
+                    content.innerHTML = `<p style="color: #f8a0a0;">❌ 刪除失敗：${result.error || '未知錯誤'}</p>`;
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '確認刪除';
+                }
+            } catch (error) {
+                content.innerHTML = `<p style="color: #f8a0a0;">❌ 刪除失敗：${error.message}</p>`;
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = '確認刪除';
+            }
+        }
+        
+        // 允許按 Enter 鍵確認輸入
+        document.addEventListener('DOMContentLoaded', () => {
+            const confirmInput = document.getElementById('delete-all-confirm-input');
+            if (confirmInput) {
+                confirmInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && deleteAllStep === 2) {
+                        proceedDeleteAll();
+                    }
+                });
+            }
+        });
 
         // 斷詞並渲染歌詞
         async function segmentAndRenderLyric(text) {
