@@ -145,16 +145,7 @@
             overflow-wrap: break-word;
             white-space: pre-line; /* 保留換行，將連續空格視為一個空格 */
         }
-        .lyric-word {
-            cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 4px;
-            transition: background 0.2s;
-            display: inline;
-        }
-        .lyric-word:hover {
-            background: rgba(170,204,255,0.2);
-        }
+        /* 移除按鈕樣式，文字看起來完全正常 */
         .search-box {
             margin-bottom: 20px;
         }
@@ -442,21 +433,23 @@
                 const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
                 document.getElementById('lyric-detail-date').textContent = `更新時間：${date}`;
                 
-                // 斷詞並顯示
+                // 斷詞並顯示（不包裝成按鈕，保持原始文字樣式）
                 const segmentedContent = await segmentAndRenderLyric(lyric.content);
                 const detailContentEl = document.getElementById('lyric-detail-content');
                 detailContentEl.innerHTML = segmentedContent;
                 
-                // 綁定點擊事件（使用事件委派，確保動態添加的元素也能響應）
+                // 綁定點擊事件（跟 rasrss 一樣的方式：直接在文字上點擊）
                 detailContentEl.addEventListener('click', function handleWordClick(ev) {
-                    const wordEl = ev.target.closest('.lyric-word');
-                    if (wordEl) {
-                        const word = wordEl.getAttribute('data-word');
-                        if (word) {
-                            ev.stopPropagation();
-                            showFuriganaAt(ev.clientX, ev.clientY, word);
-                        }
-                    }
+                    // 如果點擊的是假名彈窗，不處理
+                    if (ev.target.closest('.furigana-pop')) return;
+                    
+                    const range = caretRangeFromPoint(ev.clientX, ev.clientY);
+                    if (!range) return;
+                    const node = range.startContainer;
+                    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+                    const word = pickWordFromTextNode(node.textContent || '', range.startOffset);
+                    if (!word) return;
+                    showFuriganaAt(ev.clientX, ev.clientY, word);
                 }, { once: false });
                 
                 document.getElementById('list-tab').classList.remove('active');
@@ -604,7 +597,7 @@
             }
         });
 
-        // 斷詞並渲染歌詞
+        // 斷詞並渲染歌詞（不包裝成按鈕，保持原始文字樣式）
         async function segmentAndRenderLyric(text) {
             try {
                 const response = await fetch('/api/segment', {
@@ -619,7 +612,7 @@
                     return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
                 }
                 
-                // 將斷詞結果渲染成可點擊的單字
+                // 將斷詞結果渲染成普通文字（不包裝成按鈕）
                 // 空格會轉換為換行，保持原始格式
                 let html = '';
                 for (const segment of data.segments) {
@@ -629,14 +622,10 @@
                     } else if (segment === '__SPACE__') {
                         // 空格標記：轉換為換行（使用者輸入的空格當作斷行）
                         html += '<br>';
-                    } else if (segment.trim() && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(segment)) {
-                        // 包含日文字元，做成可點擊
-                        html += `<span class="lyric-word" data-word="${escapeHtml(segment)}">${escapeHtml(segment)}</span>`;
-                    } else if (segment.trim()) {
-                        // 其他字元（標點符號等）
+                    } else {
+                        // 所有文字直接顯示，不包裝成 span
                         html += escapeHtml(segment);
                     }
-                    // 完全空白的 segment 跳過
                 }
                 
                 return html;
@@ -645,6 +634,70 @@
                 // 錯誤時也將空格轉換為換行
                 return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
             }
+        }
+        
+        // 日文字元判斷
+        function isJapaneseChar(c) {
+            return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(c);
+        }
+        
+        // 判斷是否包含漢字
+        function hasKanji(s) {
+            return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(s || '');
+        }
+        
+        // 從文字節點中選取單字（跟 rasrss 一樣的邏輯）
+        function pickWordFromTextNode(text, offset) {
+            if (!text) return '';
+            const i = Math.min(Math.max(offset, 0), Math.max(text.length - 1, 0));
+
+            // 1) 優先用瀏覽器的日文斷詞（更精確，不會一次抓一大串）
+            try {
+                if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                    const seg = new Intl.Segmenter('ja', { granularity: 'word' });
+                    for (const part of seg.segment(text)) {
+                        const start = part.index;
+                        const end = start + part.segment.length;
+                        if (i >= start && i < end) {
+                            const w = (part.segment || '').trim();
+                            if (!w) return '';
+                            if (!hasKanji(w)) return ''; // 只對「含漢字的詞」顯示讀音
+                            return w.length > 24 ? w.slice(0, 24) : w;
+                        }
+                    }
+                }
+            } catch (e) {
+                // ignore and fallback
+            }
+
+            // 2) fallback：簡易規則（避免一次抓到整句）
+            let j = i;
+            if (j > 0 && !isJapaneseChar(text[j]) && isJapaneseChar(text[j - 1])) j = j - 1;
+            if (!isJapaneseChar(text[j])) return '';
+            let l = j, r = j;
+            // 句讀點/空白/括號等直接截斷
+            const stopRe = /[\s\u3000、。．，,\.\(\)\[\]「」『』【】＜＞<>]/;
+            while (l > 0 && isJapaneseChar(text[l - 1]) && !stopRe.test(text[l - 1])) l--;
+            while (r < text.length && isJapaneseChar(text[r]) && !stopRe.test(text[r])) r++;
+            let w = text.slice(l, r).trim();
+            // 再限縮：只保留前後最多 16 字，避免超長連續字串
+            if (w.length > 16) w = w.slice(0, 16);
+            if (!hasKanji(w)) return '';
+            return w;
+        }
+        
+        // 取得點擊位置的文字範圍（跟 rasrss 一樣的邏輯）
+        function caretRangeFromPoint(x, y) {
+            if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+            if (document.caretPositionFromPoint) {
+                const pos = document.caretPositionFromPoint(x, y);
+                if (!pos) return null;
+                const range = document.createRange();
+                range.setStart(pos.offsetNode, pos.offset);
+                range.setEnd(pos.offsetNode, pos.offset);
+                return range;
+            }
+            return null;
         }
 
         // 顯示假名彈窗
