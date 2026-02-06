@@ -65,6 +65,7 @@ def segment_japanese_text(text: str) -> list:
     """
     簡單的日文斷詞（以空白、標點符號分割，保留日文字元）。
     更精確的斷詞可以使用 janome 或 mecab，這裡先用簡單方式。
+    會嘗試在助詞、動詞變化等位置分割，讓單字更容易點擊。
     """
     if not text:
         return []
@@ -72,31 +73,46 @@ def segment_japanese_text(text: str) -> list:
     # 移除多餘空白，但保留換行
     text = re.sub(r'[ \t]+', ' ', text)
     
-    # 分割：空白、標點符號、但保留日文字元組
-    # 日文字元範圍：ひらがな、カタカナ、漢字
+    # 日文助詞和常見分割點
+    # 助詞：は、が、を、に、で、と、から、まで、より、へ、の、も、など
+    # 動詞變化：ます、です、だ、である、て、た、だ、など
+    # 標點符號
+    split_pattern = r'([\s，。、！？；：\n])|([はがをにでとからまでよりへのも]+)|([ますですだてた]+)'
+    
     segments = []
-    current = ""
+    last_end = 0
     
-    for char in text:
-        if char.isspace() or char in '，。、！？；：':
-            if current:
-                segments.append(current)
-                current = ""
-            if char == '\n':
+    for match in re.finditer(split_pattern, text):
+        # 添加匹配前的文字
+        if match.start() > last_end:
+            word = text[last_end:match.start()]
+            if word:
+                segments.append(word)
+        
+        # 添加分隔符（空白、標點、換行）
+        if match.group(1):  # 空白或標點
+            if match.group(1) == '\n':
                 segments.append('\n')
-        elif re.match(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]', char):
-            # 日文字元
-            current += char
-        else:
-            # 其他字元（英文、數字等）
-            if current:
-                segments.append(current)
-                current = ""
-            if char.strip():
-                segments.append(char)
+            elif match.group(1).strip():
+                segments.append(match.group(1))
+        elif match.group(2) or match.group(3):  # 助詞或動詞變化
+            # 將助詞/動詞變化作為單獨的詞
+            segments.append(match.group(0))
+        
+        last_end = match.end()
     
-    if current:
-        segments.append(current)
+    # 添加剩餘文字
+    if last_end < len(text):
+        word = text[last_end:]
+        if word:
+            segments.append(word)
+    
+    # 如果沒有匹配到任何分割點，使用簡單分割
+    if not segments:
+        segments = [text]
+    
+    # 過濾空字串
+    segments = [s for s in segments if s]
     
     return segments
 
