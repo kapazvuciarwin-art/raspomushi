@@ -18,24 +18,58 @@ DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rasporuno.d
 # rasword 單字庫服務：預設跑在本機 5000 port，可用環境變數覆蓋
 RASWORD_BASE_URL = os.getenv("RASWORD_BASE_URL", "http://127.0.0.1:5000")
 
+_TAGGER = None
 _KAKASI = None
+
+
+def _katakana_to_hiragana(s: str) -> str:
+    """UniDic 回傳片假名，轉成平假名。"""
+    if not s:
+        return s
+    result = []
+    for c in s:
+        code = ord(c)
+        # 片假名 U+30A1..U+30F6 → 平假名 U+3041..U+3096
+        if 0x30A1 <= code <= 0x30F6:
+            result.append(chr(code - 0x60))
+        else:
+            result.append(c)
+    return "".join(result)
 
 
 def to_furigana(text: str) -> str:
     """
     將日文（含漢字）轉成假名（平假名為主）。
+    優先使用 MeCab + UniDic（fugashi）以正確處理訓讀；失敗時 fallback pykakasi。
     """
-    global _KAKASI
     if not text:
         return ""
+    # 1) MeCab + UniDic（fugashi）
+    try:
+        global _TAGGER
+        if _TAGGER is None:
+            from fugashi import Tagger
+            _TAGGER = Tagger()
+        parts = []
+        for word in _TAGGER(text):
+            kana = getattr(word.feature, "kana", None) or getattr(word.feature, "pron", None)
+            if kana:
+                parts.append(_katakana_to_hiragana(kana))
+            else:
+                parts.append(word.surface)
+        if parts:
+            return "".join(parts).strip()
+    except Exception:
+        pass
+    # 2) fallback: pykakasi
+    global _KAKASI
     if _KAKASI is None:
-        from pykakasi import kakasi  # lazy import，避免沒裝時影響其他功能
-
+        from pykakasi import kakasi
         k = kakasi()
-        k.setMode("J", "H")  # Kanji -> Hiragana
-        k.setMode("K", "H")  # Katakana -> Hiragana
-        k.setMode("H", "H")  # Hiragana -> Hiragana
-        k.setMode("r", "Hepburn")  # not used, but keeps default stable
+        k.setMode("J", "H")
+        k.setMode("K", "H")
+        k.setMode("H", "H")
+        k.setMode("r", "Hepburn")
         _KAKASI = k.getConverter()
     return (_KAKASI.do(text) or "").strip()
 

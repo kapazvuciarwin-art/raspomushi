@@ -176,6 +176,22 @@
         }
         .furigana-pop .w { color: #bcd7ff; font-weight: 700; }
         .furigana-pop .r { color: #eaeaea; }
+        .furigana-extend-btn {
+            margin-left: 6px;
+            padding: 2px 6px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            color: #eaeaea;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        .furigana-extend-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .furigana-extend-results { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9rem; color: #aaa; }
+        .furigana-extend-results .item { margin: 4px 0; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+        .furigana-extend-results .item:hover { background: rgba(255,255,255,0.1); color: #eaeaea; }
     </style>
 </head>
 <body>
@@ -279,6 +295,8 @@
         let furiganaAbort = null;
         let currentWord = null;
         let currentReading = null;
+        let currentContextText = '';
+        let currentContextOffset = 0;
 
         function escapeHtml(text) {
             const div = document.createElement('div');
@@ -463,7 +481,7 @@
                     if (!word) return;
                     
                     ev.stopPropagation();
-                    showFuriganaAt(ev.clientX, ev.clientY, word);
+                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset);
                 });
                 
                 document.getElementById('list-tab').classList.remove('active');
@@ -723,36 +741,88 @@
             furiganaPop.style.display = 'none';
             currentWord = null;
             currentReading = null;
+            currentContextText = '';
+            currentContextOffset = 0;
             furiganaPop.removeAttribute('data-mode');
         }
 
-        async function showFuriganaAt(x, y, word) {
+        function furiganaFirstLineHtml(word, reading, isPlaceholder) {
+            const r = reading != null ? reading : (isPlaceholder ? '…' : '無');
+            const extendBtn = (currentContextText !== '' && currentContextText.length > currentContextOffset + 1)
+                ? ` <button type="button" class="furigana-extend-btn" title="試試較長範圍">&gt;</button>`
+                : '';
+            return `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(r)})</span>${extendBtn}`;
+        }
+
+        async function showFuriganaAt(x, y, word, contextText, contextOffset) {
             if (!word) return;
             hideFurigana();
             currentWord = word;
+            currentContextText = typeof contextText === 'string' ? contextText : '';
+            currentContextOffset = typeof contextOffset === 'number' ? contextOffset : 0;
             furiganaPop.style.left = Math.min(x + 12, window.innerWidth - 30) + 'px';
             furiganaPop.style.top = Math.min(y + 8, window.innerHeight - 30) + 'px';
             furiganaPop.style.display = 'block';
-            furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(…)</span>`;
+            furiganaPop.innerHTML = furiganaFirstLineHtml(word, null, true);
 
             furiganaAbort = new AbortController();
             try {
                 const res = await fetch('/api/furigana?text=' + encodeURIComponent(word), { signal: furiganaAbort.signal });
                 const data = await res.json();
                 if (!data || !data.ok) {
-                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(查詢失敗)</span>`;
+                    furiganaPop.innerHTML = furiganaFirstLineHtml(word, '查詢失敗', false);
                     return;
                 }
                 currentReading = (data.reading || '').trim() || '無';
-                // 確保假名正確顯示
                 if (currentReading && currentReading !== '無') {
-                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(currentReading)})</span>`;
+                    furiganaPop.innerHTML = furiganaFirstLineHtml(word, currentReading, false);
                 } else {
-                    furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(無讀音)</span>`;
+                    furiganaPop.innerHTML = furiganaFirstLineHtml(word, '無讀音', false);
                 }
             } catch (e) {
                 if (e.name === 'AbortError') return;
-                furiganaPop.innerHTML = `<span class="w">${escapeHtml(word)}</span> <span class="r">(查詢失敗)</span>`;
+                furiganaPop.innerHTML = furiganaFirstLineHtml(word, '查詢失敗', false);
+            }
+        }
+
+        async function extendFuriganaRange() {
+            if (!currentContextText || currentContextOffset < 0) return;
+            const text = currentContextText;
+            const offset = currentContextOffset;
+            const stopRe = /[\s\u3000、。．，,\.\(\)\[\]「」『』【】＜＞<>]/;
+            const maxLen = 10;
+            const candidates = [];
+            for (let len = 2; len <= maxLen && offset + len <= text.length; len++) {
+                const sub = text.slice(offset, offset + len);
+                if (stopRe.test(sub)) break;
+                if (sub.length > (currentWord || '').length) candidates.push(sub);
+            }
+            if (candidates.length === 0) return;
+            const container = document.getElementById('furigana-extend-results') || (function() {
+                const el = document.createElement('div');
+                el.id = 'furigana-extend-results';
+                el.className = 'furigana-extend-results';
+                furiganaPop.appendChild(el);
+                return el;
+            }());
+            container.innerHTML = '<span style="color:#888;">較長範圍：</span>';
+            for (const sub of candidates) {
+                try {
+                    const res = await fetch('/api/furigana?text=' + encodeURIComponent(sub));
+                    const data = await res.json();
+                    if (data && data.ok && data.reading) {
+                        const reading = (data.reading || '').trim();
+                        if (reading !== (currentReading || '')) {
+                            const item = document.createElement('div');
+                            item.className = 'item';
+                            item.setAttribute('data-word', sub);
+                            item.setAttribute('data-reading', reading);
+                            item.textContent = sub + ' (' + reading + ')';
+                            item.title = '點擊可新增此詞到 rasword';
+                            container.appendChild(item);
+                        }
+                    }
+                } catch (e) { /* skip */ }
             }
         }
 
@@ -794,26 +864,41 @@
             }
         }
 
-        // 點擊假名彈窗：詢問是否新增到 rasword
+        function showConfirmAddToRasword() {
+            const reading = currentReading || '…';
+            furiganaPop.setAttribute('data-mode', 'confirm');
+            furiganaPop.innerHTML = `
+                <div>
+                    <div class="w">${escapeHtml(currentWord)}</div>
+                    <div class="r">(${escapeHtml(reading)})</div>
+                    <div style="margin-top:4px;font-size:0.85rem;color:#ccc;">要新增到 rasword 單字庫嗎？</div>
+                    <div style="margin-top:6px;display:flex;gap:8px;">
+                        <button type="button" data-choice="y" style="padding:4px 10px;border-radius:6px;border:none;background:#22c55e;color:#fff;cursor:pointer;">y</button>
+                        <button type="button" data-choice="n" style="padding:4px 10px;border-radius:6px;border:none;background:#6b7280;color:#fff;cursor:pointer;">n</button>
+                    </div>
+                    <div id="furigana-add-status" style="margin-top:6px;font-size:0.8rem;"></div>
+                </div>
+            `;
+        }
+
+        // 點擊假名彈窗：詢問是否新增到 rasword；「>」按鈕則執行較長範圍查詢；較長範圍的詞可點擊新增
         furiganaPop.addEventListener('click', (ev) => {
             ev.stopPropagation();
+            if (ev.target.closest('.furigana-extend-btn')) {
+                extendFuriganaRange();
+                return;
+            }
+            const extendItem = ev.target.closest('.furigana-extend-results .item');
+            if (extendItem && extendItem.dataset.word) {
+                currentWord = extendItem.dataset.word;
+                currentReading = (extendItem.dataset.reading || '').trim() || '…';
+                showConfirmAddToRasword();
+                return;
+            }
             if (!currentWord) return;
             const mode = furiganaPop.getAttribute('data-mode') || 'reading';
             if (mode === 'reading') {
-                const reading = currentReading || '…';
-                furiganaPop.setAttribute('data-mode', 'confirm');
-                furiganaPop.innerHTML = `
-                    <div>
-                        <div class="w">${escapeHtml(currentWord)}</div>
-                        <div class="r">(${escapeHtml(reading)})</div>
-                        <div style="margin-top:4px;font-size:0.85rem;color:#ccc;">要新增到 rasword 單字庫嗎？</div>
-                        <div style="margin-top:6px;display:flex;gap:8px;">
-                            <button type="button" data-choice="y" style="padding:4px 10px;border-radius:6px;border:none;background:#22c55e;color:#fff;cursor:pointer;">y</button>
-                            <button type="button" data-choice="n" style="padding:4px 10px;border-radius:6px;border:none;background:#6b7280;color:#fff;cursor:pointer;">n</button>
-                        </div>
-                        <div id="furigana-add-status" style="margin-top:6px;font-size:0.8rem;"></div>
-                    </div>
-                `;
+                showConfirmAddToRasword();
                 return;
             }
             const target = ev.target;
