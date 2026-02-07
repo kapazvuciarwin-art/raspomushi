@@ -100,7 +100,7 @@ def segment_japanese_text(text: str) -> list:
     簡單的日文斷詞（以空白、標點符號分割，保留日文字元）。
     更精確的斷詞可以使用 janome 或 mecab，這裡先用簡單方式。
     會嘗試在助詞、動詞變化等位置分割，讓單字更容易點擊。
-    保留原始空格和換行，空格會在前端轉換為換行顯示。
+    保留原始空格和換行，空格維持為空格顯示。
     """
     if not text:
         return []
@@ -127,9 +127,8 @@ def segment_japanese_text(text: str) -> list:
             if match.group(1) == '\n':
                 segments.append('\n')
             elif match.group(1) in ' \t':
-                # 空格和 tab：標記為特殊字串，前端會轉換為換行
-                # 使用特殊標記 '__SPACE__' 以便前端識別
-                segments.append('__SPACE__')
+                # 空格和 tab：保留原樣，前端顯示為空格
+                segments.append(match.group(1))
             elif match.group(1).strip():
                 # 標點符號
                 segments.append(match.group(1))

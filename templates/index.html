@@ -136,11 +136,32 @@
             border-bottom: 1px solid rgba(255,255,255,0.06);
         }
         .lyrics-list li:last-child { border-bottom: none; }
-        .lyric-title {
-            font-weight: 600;
+        .lyric-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
             margin-bottom: 4px;
-            color: #ddd;
+        }
+        .lyric-title-btn {
+            flex: 1;
+            min-width: 0;
+            padding: 0;
+            border: none;
+            background: none;
+            font-weight: 600;
             font-size: 1.1rem;
+            color: #ddd;
+            text-align: left;
+            cursor: pointer;
+        }
+        .lyric-title-btn:hover {
+            color: #fff;
+        }
+        .lyric-list-delete {
+            flex-shrink: 0;
+            padding: 4px 10px;
+            font-size: 0.8rem;
         }
         .lyric-date {
             font-size: 0.8rem;
@@ -473,13 +494,12 @@
                     const preview = lyric.content.substring(0, 100) + (lyric.content.length > 100 ? '...' : '');
                     html += `
                         <li>
-                            <div class="lyric-title">${escapeHtml(lyric.title)}</div>
+                            <div class="lyric-title-row">
+                                <button type="button" class="lyric-title-btn" onclick="showLyricDetail(${lyric.id})">${escapeHtml(lyric.title)}</button>
+                                <button type="button" class="btn btn-danger lyric-list-delete" onclick="deleteLyric(${lyric.id})">刪除</button>
+                            </div>
                             <div class="lyric-date">${date}</div>
                             <div class="lyric-preview">${escapeHtml(preview)}</div>
-                            <div style="margin-top: 8px;">
-                                <button class="btn btn-primary btn-small" onclick="showLyricDetail(${lyric.id})">查看詳情</button>
-                                <button class="btn btn-danger btn-small" onclick="deleteLyric(${lyric.id})">刪除</button>
-                            </div>
                         </li>
                     `;
                 }
@@ -721,22 +741,16 @@
                 const data = await response.json();
                 
                 if (!data.ok || !data.segments) {
-                    // 如果斷詞失敗，直接處理原始文字：將空格轉換為換行
-                    return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
+                    // 如果斷詞失敗，直接處理原始文字：僅換行轉為 <br>，空格維持
+                    return escapeHtml(text).replace(/\n/g, '<br>');
                 }
                 
-                // 將斷詞結果渲染成 HTML（使用 <br> 換行）
-                // 空格會轉換為換行，保持原始格式
+                // 將斷詞結果渲染成 HTML（使用 <br> 換行，空格維持為空格）
                 let html = '';
                 for (const segment of data.segments) {
                     if (segment === '\n') {
-                        // 換行符號
-                        html += '<br>';
-                    } else if (segment === '__SPACE__') {
-                        // 空格標記：轉換為換行（使用者輸入的空格當作斷行）
                         html += '<br>';
                     } else {
-                        // 所有文字直接顯示，不包裝成 span（使用 escapeHtml 防止 XSS）
                         html += escapeHtml(segment);
                     }
                 }
@@ -744,8 +758,8 @@
                 return html;
             } catch (error) {
                 console.error('斷詞失敗:', error);
-                // 錯誤時也將空格轉換為換行
-                return escapeHtml(text).replace(/ /g, '\n').replace(/\n/g, '<br>');
+                // 錯誤時僅換行轉為 <br>，空格維持
+                return escapeHtml(text).replace(/\n/g, '<br>');
             }
         }
         
