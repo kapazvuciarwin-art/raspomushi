@@ -11,9 +11,31 @@
             background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
             min-height: 100vh;
             color: #e8e8e8;
-            padding: 24px;
+            padding: 16px;
         }
         .container { max-width: 1000px; margin: 0 auto; }
+        @media (min-width: 1024px) {
+            .container {
+                display: grid;
+                grid-template-columns: 280px 1fr;
+                max-width: none;
+                gap: 0 20px;
+            }
+            .container > h1,
+            .container > p,
+            .container > .tabs,
+            .container > #add-tab,
+            .container > #batch-tab {
+                grid-column: 1 / -1;
+            }
+            .container > #list-tab {
+                grid-column: 1;
+                align-self: start;
+            }
+            .container > #lyric-detail-card {
+                grid-column: 2;
+            }
+        }
         h1 {
             text-align: center;
             margin-bottom: 24px;
@@ -143,8 +165,41 @@
             word-wrap: break-word;
             word-break: break-word;
             overflow-wrap: break-word;
-            white-space: pre-wrap; /* 保留換行和空格，跟 rasrss 一樣 */
-            cursor: text; /* 顯示文字游標 */
+            white-space: pre-wrap;
+            cursor: text;
+        }
+        /* 歌詞詳情區：緊湊留白、滿版寬（小螢幕） */
+        #lyric-detail-card {
+            width: 100vw;
+            max-width: 100vw;
+            margin-left: calc(50% - 50vw);
+            margin-right: calc(50% - 50vw);
+            padding: 12px 10px 16px;
+            box-sizing: border-box;
+        }
+        #lyric-detail-card .lyric-full {
+            padding: 10px 8px;
+            line-height: 1.5;
+            margin-top: 8px;
+        }
+        #lyric-detail-card h2 {
+            margin-bottom: 6px;
+        }
+        #lyric-detail-card .lyric-date {
+            margin-bottom: 6px;
+        }
+        #lyric-detail-card > div:not(.lyric-full) {
+            margin-bottom: 8px;
+        }
+        /* 寬螢幕：左列表、右歌詞，取消滿版 breakout */
+        @media (min-width: 1024px) {
+            #lyric-detail-card {
+                width: auto;
+                max-width: none;
+                margin-left: 0;
+                margin-right: 0;
+                padding: 16px 12px 20px;
+            }
         }
         /* 移除按鈕樣式，文字看起來完全正常 */
         .search-box {
