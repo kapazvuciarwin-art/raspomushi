@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rasporuno － 日文歌詞資料庫</title>
+    <title>raspomushi － 日文歌詞瀏覽</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -22,10 +22,7 @@
                 gap: 0 20px;
             }
             .container > h1,
-            .container > p,
-            .container > .tabs,
-            .container > #add-tab,
-            .container > #batch-tab {
+            .container > p {
                 grid-column: 1 / -1;
             }
             .container > #list-tab {
@@ -272,85 +269,31 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎵 rasporuno － 日文歌詞資料庫</h1>
+        <h1>🎵 raspomushi － 日文歌詞瀏覽</h1>
         <p style="text-align: center; color: #888; margin-bottom: 24px;">
-            輸入日文歌詞，支援斷詞、假名顯示，並可將單字加入 rasword 單字庫
+            瀏覽歌詞、斷詞假名、關鍵字搜尋，並可將單字加入 rasword 單字庫（無手動輸入）
         </p>
 
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('add')">新增歌詞</button>
-            <button class="tab-btn" onclick="switchTab('batch')">批次匯入</button>
-            <button class="tab-btn" onclick="switchTab('list')">歌詞列表</button>
-        </div>
-
-        <!-- 新增歌詞頁面 -->
-        <div id="add-tab" class="tab-content active">
-            <div class="card">
-                <h2>📝 新增單首歌詞</h2>
-                <div id="add-msg"></div>
-                <form id="lyric-form">
-                    <div class="form-group">
-                        <label>歌名</label>
-                        <input type="text" id="lyric-title" placeholder="輸入歌名" required>
-                    </div>
-                    <div class="form-group">
-                        <label>歌詞內容</label>
-                        <textarea id="lyric-content" placeholder="輸入歌詞內容" required></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">新增歌詞</button>
-                </form>
-            </div>
-        </div>
-
-        <!-- 批次匯入頁面 -->
-        <div id="batch-tab" class="tab-content">
-            <div class="card">
-                <h2>📦 批次匯入歌詞</h2>
-                <div id="batch-msg"></div>
-                <div class="form-group">
-                    <label>批次資料格式：</label>
-                    <pre style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 6px; color: #aaa; font-size: 0.85rem; margin-bottom: 12px;">
-=== 歌名1.txt ===
-歌詞內容
-
-=== 歌名2.txt ===
-歌詞內容</pre>
-                </div>
-                <div class="form-group">
-                    <label>批次資料</label>
-                    <textarea id="batch-input" placeholder="貼上批次資料" style="min-height: 300px;"></textarea>
-                </div>
-                <button type="button" class="btn btn-primary" onclick="batchImport()">批次匯入</button>
-            </div>
-        </div>
-
-        <!-- 歌詞列表頁面 -->
-        <div id="list-tab" class="tab-content">
+        <!-- 歌詞列表 -->
+        <div id="list-tab" class="tab-content active">
             <div class="card">
                 <h2>📋 歌詞列表</h2>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <div class="search-box" style="flex: 1; margin-bottom: 0;">
+                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
+                    <div class="search-box" style="flex: 1; margin-bottom: 0; min-width: 200px;">
                         <input type="text" id="search-keyword" placeholder="搜尋歌名或歌詞內容..." onkeyup="searchLyrics()">
                     </div>
-                    <button class="btn btn-danger" onclick="confirmDeleteAll()" style="margin-left: 12px;">🗑️ 刪除全部</button>
+                    <select id="sort-select" onchange="searchLyrics()" style="padding: 10px 14px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: rgba(0,0,0,0.2); color: #fff; font-size: 0.95rem; cursor: pointer;">
+                        <option value="recent">最近開啟</option>
+                        <option value="popular">點閱次數</option>
+                        <option value="words">單字數</option>
+                    </select>
+                    <button type="button" class="btn btn-success" id="check-new-songs-btn" onclick="checkNewSongs()" style="flex-shrink: 0;">
+                        🔍 檢查新歌
+                    </button>
                 </div>
+                <div id="check-new-songs-status" style="margin-bottom: 12px;"></div>
                 <div id="lyrics-list-container">
                     <p style="color: #888; text-align: center;">載入中...</p>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 刪除全部確認對話框 -->
-        <div id="delete-all-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
-            <div style="background: rgba(30,30,40,0.95); padding: 24px; border-radius: 12px; max-width: 500px; width: 90%; border: 1px solid rgba(255,255,255,0.1);">
-                <h3 style="color: #f8a0a0; margin-bottom: 16px;" id="delete-all-title">⚠️ 確認刪除全部歌詞</h3>
-                <div id="delete-all-content" style="color: #ddd; margin-bottom: 20px;"></div>
-                <div id="delete-all-input-area" style="display: none; margin-bottom: 16px;">
-                    <input type="text" id="delete-all-confirm-input" placeholder="請輸入 DELETE_ALL 確認" style="width: 100%; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: #fff;">
-                </div>
-                <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                    <button class="btn btn-secondary" onclick="cancelDeleteAll()">取消</button>
-                    <button class="btn btn-danger" id="delete-all-confirm-btn" onclick="proceedDeleteAll()">確認刪除</button>
                 </div>
             </div>
         </div>
@@ -358,7 +301,6 @@
         <!-- 歌詞詳情頁面（動態顯示） -->
         <div id="lyric-detail-card" class="card" style="display: none;">
             <h2 id="lyric-detail-title"></h2>
-            <div class="lyric-date" id="lyric-detail-date"></div>
             <div style="margin-bottom: 12px;">
                 <button type="button" class="btn btn-primary btn-small" id="apple-music-play-btn" onclick="openAppleMusic()" title="以歌名在 Apple Music 搜尋並開啟播放">在 Apple Music 播放</button>
                 <span id="apple-music-status" style="margin-left: 8px; font-size: 0.9rem; color: #888;"></span>
@@ -384,102 +326,19 @@
             return div.innerHTML;
         }
 
-        function switchTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
-            document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
-            document.getElementById(`${tab}-tab`).classList.add('active');
-            
-            if (tab === 'list') {
-                loadLyricsList();
-            }
-        }
-
-        // 新增歌詞表單
-        document.getElementById('lyric-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const msgEl = document.getElementById('add-msg');
-            const title = document.getElementById('lyric-title').value.trim();
-            const content = document.getElementById('lyric-content').value.trim();
-            
-            if (!title || !content) {
-                msgEl.innerHTML = '<div class="msg error">請填寫歌名和歌詞內容</div>';
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/lyrics', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title, content })
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    msgEl.innerHTML = '<div class="msg success">✅ 歌詞新增成功！</div>';
-                    document.getElementById('lyric-form').reset();
-                    setTimeout(() => {
-                        msgEl.innerHTML = '';
-                        switchTab('list');
-                    }, 1500);
-                } else {
-                    msgEl.innerHTML = `<div class="msg error">❌ ${result.error || '新增失敗'}</div>`;
-                }
-            } catch (error) {
-                msgEl.innerHTML = `<div class="msg error">❌ 新增失敗：${error.message}</div>`;
-            }
-        });
-
-        // 批次匯入
-        async function batchImport() {
-            const msgEl = document.getElementById('batch-msg');
-            const batchText = document.getElementById('batch-input').value.trim();
-            
-            if (!batchText) {
-                msgEl.innerHTML = '<div class="msg error">請輸入批次資料</div>';
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/lyrics/batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ batch_text: batchText })
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    let html = `<div class="msg success">✅ 成功匯入 ${result.count} 首歌詞！</div>`;
-                    if (result.errors && result.errors.length > 0) {
-                        html += `<div class="msg error">⚠️ ${result.errors.length} 首失敗：<ul>`;
-                        result.errors.forEach(err => {
-                            html += `<li>${escapeHtml(err.title)}: ${escapeHtml(err.error)}</li>`;
-                        });
-                        html += '</ul></div>';
-                    }
-                    msgEl.innerHTML = html;
-                    document.getElementById('batch-input').value = '';
-                    setTimeout(() => {
-                        switchTab('list');
-                    }, 2000);
-                } else {
-                    msgEl.innerHTML = `<div class="msg error">❌ ${result.error || '匯入失敗'}</div>`;
-                }
-            } catch (error) {
-                msgEl.innerHTML = `<div class="msg error">❌ 匯入失敗：${error.message}</div>`;
-            }
-        }
-
         // 載入歌詞列表
         async function loadLyricsList(keyword = '') {
             const container = document.getElementById('lyrics-list-container');
             container.innerHTML = '<p style="color: #888; text-align: center;">載入中...</p>';
             
             try {
-                const url = keyword ? `/api/lyrics?keyword=${encodeURIComponent(keyword)}` : '/api/lyrics';
+                const sortBy = document.getElementById('sort-select').value;
+                const params = new URLSearchParams();
+                if (keyword) {
+                    params.append('keyword', keyword);
+                }
+                params.append('sort', sortBy);
+                const url = `/api/lyrics?${params.toString()}`;
                 const response = await fetch(url);
                 const lyrics = await response.json();
                 
@@ -490,15 +349,19 @@
                 
                 let html = '<ul class="lyrics-list">';
                 for (const lyric of lyrics) {
-                    const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
                     const preview = lyric.content.substring(0, 100) + (lyric.content.length > 100 ? '...' : '');
+                    const viewCount = lyric.view_count || 0;
+                    const wordCount = lyric.saved_word_count || 0;
                     html += `
                         <li>
                             <div class="lyric-title-row">
                                 <button type="button" class="lyric-title-btn" onclick="showLyricDetail(${lyric.id})">${escapeHtml(lyric.title)}</button>
                                 <button type="button" class="btn btn-danger lyric-list-delete" onclick="deleteLyric(${lyric.id})">刪除</button>
                             </div>
-                            <div class="lyric-date">${date}</div>
+                            <div style="font-size: 0.8rem; color: #888; margin-bottom: 8px;">
+                                <span style="margin-right: 12px;">👁️ ${viewCount}</span>
+                                <span>📝 ${wordCount}</span>
+                            </div>
                             <div class="lyric-preview">${escapeHtml(preview)}</div>
                         </li>
                     `;
@@ -515,6 +378,49 @@
             const keyword = document.getElementById('search-keyword').value.trim();
             loadLyricsList(keyword);
         }
+        
+        // 儲存排序選項到 localStorage
+        document.getElementById('sort-select').addEventListener('change', function() {
+            localStorage.setItem('raspomushi_sort', this.value);
+        });
+        
+        // 載入儲存的排序選項
+        const savedSort = localStorage.getItem('raspomushi_sort');
+        if (savedSort) {
+            document.getElementById('sort-select').value = savedSort;
+        }
+
+        // 檢查新歌
+        async function checkNewSongs() {
+            const btn = document.getElementById('check-new-songs-btn');
+            const statusEl = document.getElementById('check-new-songs-status');
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ 檢查中...';
+            statusEl.innerHTML = '<div class="msg info">正在檢查 uta-net 是否有新歌，請稍候（約需數分鐘）...</div>';
+            
+            try {
+                const response = await fetch('/api/check-new-songs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    statusEl.innerHTML = `<div class="msg success">✅ ${result.message || '檢查完成'}</div>`;
+                    // 重新載入歌詞列表
+                    const keyword = document.getElementById('search-keyword').value.trim();
+                    loadLyricsList(keyword);
+                } else {
+                    statusEl.innerHTML = `<div class="msg error">❌ ${result.error || '檢查失敗'}</div>`;
+                }
+            } catch (error) {
+                statusEl.innerHTML = `<div class="msg error">❌ 檢查失敗：${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 檢查新歌';
+            }
+        }
 
         // 顯示歌詞詳情
         async function showLyricDetail(id) {
@@ -528,8 +434,6 @@
                 }
                 
                 document.getElementById('lyric-detail-title').textContent = lyric.title;
-                const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
-                document.getElementById('lyric-detail-date').textContent = `更新時間：${date}`;
                 document.getElementById('apple-music-status').textContent = '';
                 
                 // 斷詞並顯示（不包裝成按鈕，保持原始文字樣式）
@@ -614,120 +518,8 @@
             }
         }
         
-        // 刪除全部歌詞的多次確認機制
-        let deleteAllStep = 0;
-        
-        function confirmDeleteAll() {
-            deleteAllStep = 1;
-            const modal = document.getElementById('delete-all-modal');
-            const title = document.getElementById('delete-all-title');
-            const content = document.getElementById('delete-all-content');
-            const inputArea = document.getElementById('delete-all-input-area');
-            const confirmBtn = document.getElementById('delete-all-confirm-btn');
-            
-            // 第一步：顯示警告
-            title.textContent = '⚠️ 警告：此操作無法復原！';
-            content.innerHTML = `
-                <p>你即將刪除<strong style="color: #f8a0a0;">所有歌詞</strong>，此操作無法復原。</p>
-                <p style="margin-top: 12px;">請確認你真的要執行此操作。</p>
-            `;
-            inputArea.style.display = 'none';
-            confirmBtn.textContent = '我了解，繼續';
-            modal.style.display = 'flex';
-        }
-        
-        function proceedDeleteAll() {
-            const modal = document.getElementById('delete-all-modal');
-            const title = document.getElementById('delete-all-title');
-            const content = document.getElementById('delete-all-content');
-            const inputArea = document.getElementById('delete-all-input-area');
-            const confirmInput = document.getElementById('delete-all-confirm-input');
-            const confirmBtn = document.getElementById('delete-all-confirm-btn');
-            
-            if (deleteAllStep === 1) {
-                // 第二步：要求輸入確認碼
-                deleteAllStep = 2;
-                title.textContent = '⚠️ 請輸入確認碼';
-                content.innerHTML = `
-                    <p>為了確認你真的要刪除全部歌詞，請輸入確認碼：<strong style="color: #aaccff;">DELETE_ALL</strong></p>
-                `;
-                inputArea.style.display = 'block';
-                confirmInput.value = '';
-                confirmInput.focus();
-                confirmBtn.textContent = '確認刪除';
-            } else if (deleteAllStep === 2) {
-                // 第三步：驗證確認碼並執行刪除
-                const confirmCode = confirmInput.value.trim();
-                if (confirmCode !== 'DELETE_ALL') {
-                    alert('❌ 確認碼錯誤，請輸入 DELETE_ALL');
-                    confirmInput.value = '';
-                    confirmInput.focus();
-                    return;
-                }
-                
-                // 最後確認
-                if (!confirm('最後確認：你真的要刪除全部歌詞嗎？此操作無法復原！')) {
-                    return;
-                }
-                
-                // 執行刪除
-                executeDeleteAll();
-            }
-        }
-        
-        function cancelDeleteAll() {
-            deleteAllStep = 0;
-            document.getElementById('delete-all-modal').style.display = 'none';
-            document.getElementById('delete-all-confirm-input').value = '';
-        }
-        
-        async function executeDeleteAll() {
-            const modal = document.getElementById('delete-all-modal');
-            const content = document.getElementById('delete-all-content');
-            const confirmBtn = document.getElementById('delete-all-confirm-btn');
-            
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = '刪除中...';
-            content.innerHTML = '<p style="color: #aaa;">正在刪除全部歌詞...</p>';
-            
-            try {
-                const response = await fetch('/api/lyrics/delete-all', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm_code: 'DELETE_ALL' })
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    content.innerHTML = `<p style="color: #90ee90;">✅ 已成功刪除 ${result.deleted_count || 0} 首歌詞</p>`;
-                    setTimeout(() => {
-                        modal.style.display = 'none';
-                        deleteAllStep = 0;
-                        loadLyricsList();
-                    }, 1500);
-                } else {
-                    content.innerHTML = `<p style="color: #f8a0a0;">❌ 刪除失敗：${result.error || '未知錯誤'}</p>`;
-                    confirmBtn.disabled = false;
-                    confirmBtn.textContent = '確認刪除';
-                }
-            } catch (error) {
-                content.innerHTML = `<p style="color: #f8a0a0;">❌ 刪除失敗：${error.message}</p>`;
-                confirmBtn.disabled = false;
-                confirmBtn.textContent = '確認刪除';
-            }
-        }
-        
-        // 允許按 Enter 鍵確認輸入
         document.addEventListener('DOMContentLoaded', () => {
-            const confirmInput = document.getElementById('delete-all-confirm-input');
-            if (confirmInput) {
-                confirmInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter' && deleteAllStep === 2) {
-                        proceedDeleteAll();
-                    }
-                });
-            }
+            loadLyricsList();
         });
 
         // 斷詞並渲染歌詞（不包裝成按鈕，保持原始文字樣式）

@@ -1,22 +1,40 @@
-"""rasporuno - 日文歌詞資料庫，支援斷詞、假名顯示、關鍵字搜尋，並可加入 rasword 單字庫"""
+"""raspomushi - 日文歌詞瀏覽（無手動輸入），支援斷詞、假名顯示、關鍵字搜尋，並可加入 rasword 單字庫"""
 
 import os
 import re
+import sys
 import sqlite3
+import time
+import threading
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import urljoin, quote
 
 import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
 load_dotenv()
 
 app = Flask(__name__)
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rasporuno.db")
+DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raspomushi.db")
 
 # rasword 單字庫服務：預設跑在本機 5000 port，可用環境變數覆蓋
 RASWORD_BASE_URL = os.getenv("RASWORD_BASE_URL", "http://127.0.0.1:5000")
+
+# uta-net 爬蟲設定
+UTA_NET_BASE_URL = "https://www.uta-net.com"
+UTA_NET_ARTIST_ID = 1686  # ポルノグラフィティ
+UTA_NET_PAGE_PATHS = [
+    "/artist/{}/".format(UTA_NET_ARTIST_ID),
+    "/artist/{}/0/2/".format(UTA_NET_ARTIST_ID),
+]
+UTA_NET_REQUEST_DELAY = 1.5
+UTA_NET_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0",
+    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
+}
 
 _TAGGER = None
 _KAKASI = None
@@ -88,9 +106,25 @@ def init_db():
             title TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            last_opened_at TEXT,
+            view_count INTEGER DEFAULT 0,
+            saved_word_count INTEGER DEFAULT 0
         )
     """)
+    # 為現有資料庫新增欄位（如果不存在）
+    try:
+        conn.execute("ALTER TABLE lyrics ADD COLUMN last_opened_at TEXT")
+    except sqlite3.OperationalError:
+        pass  # 欄位已存在
+    try:
+        conn.execute("ALTER TABLE lyrics ADD COLUMN view_count INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 欄位已存在
+    try:
+        conn.execute("ALTER TABLE lyrics ADD COLUMN saved_word_count INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 欄位已存在
     conn.commit()
     conn.close()
 
@@ -161,108 +195,63 @@ def index():
 
 @app.route('/api/lyrics', methods=['GET'])
 def get_lyrics():
-    """取得所有歌詞列表，支援關鍵字搜尋"""
+    """取得所有歌詞列表，支援關鍵字搜尋和排序"""
     keyword = request.args.get('keyword', '').strip()
+    sort_by = request.args.get('sort', 'recent')  # recent, popular, words
+    
     conn = get_db()
+    
+    # 建立排序 SQL
+    if sort_by == 'popular':
+        order_by = 'view_count DESC, last_opened_at DESC'
+    elif sort_by == 'words':
+        order_by = 'saved_word_count DESC, last_opened_at DESC'
+    else:  # recent (預設)
+        order_by = 'last_opened_at DESC, created_at DESC'
     
     if keyword:
         # 關鍵字搜尋：在標題或內容中搜尋
-        lyrics = conn.execute("""
+        lyrics = conn.execute(f"""
             SELECT * FROM lyrics 
             WHERE title LIKE ? OR content LIKE ?
-            ORDER BY updated_at DESC
+            ORDER BY {order_by}
         """, (f'%{keyword}%', f'%{keyword}%')).fetchall()
     else:
-        lyrics = conn.execute("""
+        lyrics = conn.execute(f"""
             SELECT * FROM lyrics 
-            ORDER BY updated_at DESC
+            ORDER BY {order_by}
         """).fetchall()
     
     conn.close()
     return jsonify([dict(l) for l in lyrics])
 
 
-@app.route('/api/lyrics', methods=['POST'])
-def add_lyric():
-    """新增單首歌詞"""
-    data = request.get_json() or {}
-    title = (data.get('title') or '').strip()
-    content = (data.get('content') or '').strip()
-    
-    if not title or not content:
-        return jsonify({'success': False, 'error': '標題和歌詞內容不能為空'}), 400
-    
-    now = datetime.now().isoformat()
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO lyrics (title, content, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
-    """, (title, content, now, now))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True})
-
-
-@app.route('/api/lyrics/batch', methods=['POST'])
-def batch_add_lyrics():
-    """批次新增歌詞"""
-    data = request.get_json() or {}
-    batch_text = (data.get('batch_text') or '').strip()
-    
-    if not batch_text:
-        return jsonify({'success': False, 'error': '批次資料不能為空'}), 400
-    
-    # 解析批次格式：=== 歌名1.txt ===\n歌詞內容\n\n=== 歌名2.txt ===\n歌詞內容
-    pattern = r'=== (.+?)\.txt ===\s*\n(.*?)(?=\n=== |$)'
-    matches = re.findall(pattern, batch_text, re.DOTALL)
-    
-    if not matches:
-        return jsonify({'success': False, 'error': '無法解析批次格式，請確認格式為：=== 歌名.txt ===\\n歌詞內容'}), 400
-    
-    now = datetime.now().isoformat()
-    conn = get_db()
-    success_count = 0
-    errors = []
-    
-    for title, content in matches:
-        title = title.strip()
-        content = content.strip()
-        
-        if not title or not content:
-            errors.append({'title': title or '(無標題)', 'error': '標題或內容為空'})
-            continue
-        
-        try:
-            conn.execute("""
-                INSERT INTO lyrics (title, content, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-            """, (title, content, now, now))
-            success_count += 1
-        except Exception as e:
-            errors.append({'title': title, 'error': str(e)})
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({
-        'success': True,
-        'count': success_count,
-        'errors': errors
-    })
-
-
 @app.route('/api/lyrics/<int:lyric_id>', methods=['GET'])
 def get_lyric(lyric_id):
-    """取得單首歌詞詳情"""
+    """取得單首歌詞詳情，並更新開啟時間和點閱次數"""
     conn = get_db()
     lyric = conn.execute("""
         SELECT * FROM lyrics WHERE id = ?
     """, (lyric_id,)).fetchone()
-    conn.close()
     
     if not lyric:
+        conn.close()
         return jsonify({'error': '找不到歌詞'}), 404
+    
+    # 更新 last_opened_at 和 view_count
+    now = datetime.now().isoformat()
+    conn.execute("""
+        UPDATE lyrics 
+        SET last_opened_at = ?, view_count = view_count + 1
+        WHERE id = ?
+    """, (now, lyric_id))
+    conn.commit()
+    
+    # 重新取得更新後的資料
+    lyric = conn.execute("""
+        SELECT * FROM lyrics WHERE id = ?
+    """, (lyric_id,)).fetchone()
+    conn.close()
     
     return jsonify(dict(lyric))
 
@@ -278,25 +267,182 @@ def delete_lyric(lyric_id):
     return jsonify({'success': True})
 
 
-@app.route('/api/lyrics/delete-all', methods=['POST'])
-def delete_all_lyrics():
-    """刪除全部歌詞（需要確認碼）"""
-    data = request.get_json() or {}
-    confirm_code = (data.get('confirm_code') or '').strip()
-    
-    # 確認碼必須是 "DELETE_ALL"
-    if confirm_code != 'DELETE_ALL':
-        return jsonify({'success': False, 'error': '確認碼錯誤'}), 400
-    
-    conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM lyrics").fetchone()[0]
-    conn.execute("DELETE FROM lyrics")
-    conn.commit()
-    conn.close()
-    
+def _fetch_uta_net(url):
+    """請求 uta-net 頁面"""
+    r = requests.get(url, headers=UTA_NET_HEADERS, timeout=15)
+    r.raise_for_status()
+    r.encoding = r.apparent_encoding or "utf-8"
+    return r.text
+
+
+def _extract_song_ids_from_artist_page(html):
+    """從歌手一覽頁解析出所有歌曲頁的 ID"""
+    soup = BeautifulSoup(html, "html.parser")
+    ids = []
+    for a in soup.find_all("a", href=True):
+        m = re.match(r"/song/(\d+)/?", a.get("href", ""))
+        if m:
+            sid = m.group(1)
+            if sid not in ids:
+                ids.append(sid)
+    return ids
+
+
+def _extract_title_and_lyrics(html):
+    """從歌曲頁解析歌名與歌詞本文"""
+    soup = BeautifulSoup(html, "html.parser")
+    title = ""
+    h2 = soup.find("h2")
+    if h2:
+        title = (h2.get_text(strip=True) or "").strip()
+    if not title and soup.title:
+        t = soup.title.string or ""
+        t = re.sub(r"\s*歌詞\s*-\s*歌ネット\s*$", "", t).strip()
+        if t:
+            parts = t.split(None, 1)
+            title = parts[1] if len(parts) > 1 else parts[0]
+    if not title:
+        title = "unknown"
+
+    lyrics_div = soup.find("div", id="kashi_area") or soup.find("div", id="kashi")
+    if not lyrics_div:
+        for c in ("kashi_area", "kashi", "song_table"):
+            lyrics_div = soup.find("div", class_=lambda x: x and c in (x or ""))
+            if lyrics_div:
+                break
+    if not lyrics_div:
+        for div in soup.find_all("div"):
+            if div.get("id") in ("header", "footer", "nav", "menu"):
+                continue
+            text = div.get_text(separator="\n", strip=True)
+            if len(text) > 100 and ("歌詞" in text or "作詞" in div.get_text()):
+                lyrics_div = div
+                break
+
+    content = ""
+    if lyrics_div:
+        for tag in lyrics_div.find_all(["script", "style"]):
+            tag.decompose()
+        content = lyrics_div.get_text(separator="\n", strip=True)
+        if "この歌詞をマイ歌ネットに登録" in content:
+            content = content.split("この歌詞をマイ歌ネットに登録")[0].strip()
+        if "この曲のフレーズを投稿" in content:
+            content = content.split("この曲のフレーズを投稿")[0].strip()
+        content = re.sub(r"\n{3,}", "\n\n", content).strip()
+
+    return title, content
+
+
+def _do_check_new_songs():
+    """背景執行：檢查新歌並寫入資料庫"""
+    try:
+        conn = get_db()
+        now = datetime.now().isoformat()
+
+        # 1) 取得資料庫中現有的歌名集合
+        existing_titles = set()
+        for row in conn.execute("SELECT title FROM lyrics").fetchall():
+            existing_titles.add(row[0])
+
+        # 2) 爬取歌手列表頁，取得所有 song IDs
+        all_song_ids = []
+        for path in UTA_NET_PAGE_PATHS:
+            url = urljoin(UTA_NET_BASE_URL, path)
+            try:
+                html = _fetch_uta_net(url)
+                ids = _extract_song_ids_from_artist_page(html)
+                all_song_ids.extend(ids)
+                time.sleep(UTA_NET_REQUEST_DELAY)
+            except Exception as e:
+                print(f"[raspomushi] 無法取得歌手列表頁 {url}: {e}", flush=True)
+                conn.close()
+                return
+
+        # 去重
+        seen = set()
+        unique_ids = []
+        for i in all_song_ids:
+            if i not in seen:
+                seen.add(i)
+                unique_ids.append(i)
+
+        if not unique_ids:
+            print("[raspomushi] 未找到任何歌曲（可能遇到 EU/GDPR 限制）", flush=True)
+            conn.close()
+            return
+        
+        print(f"[raspomushi] 開始檢查 {len(unique_ids)} 首歌曲...", flush=True)
+
+        # 3) 對每個 song ID，爬取歌詞頁，比對資料庫，只新增不重複的
+        inserted = 0
+        skipped = 0
+        errors = []
+
+        for i, sid in enumerate(unique_ids):
+            url = urljoin(UTA_NET_BASE_URL, "/song/{}/".format(sid))
+            try:
+                html = _fetch_uta_net(url)
+                title, content = _extract_title_and_lyrics(html)
+            except Exception as e:
+                errors.append({'song_id': sid, 'error': str(e)})
+                time.sleep(UTA_NET_REQUEST_DELAY)
+                continue
+
+            if not content or len(content) < 10:
+                skipped += 1
+                time.sleep(UTA_NET_REQUEST_DELAY)
+                continue
+
+            # 檢查是否已存在
+            cur = conn.execute("SELECT id FROM lyrics WHERE title = ?", (title,))
+            row = cur.fetchone()
+            if row:
+                skipped += 1
+            else:
+                # 新歌，寫入資料庫
+                try:
+                    conn.execute(
+                        """INSERT INTO lyrics (title, content, created_at, updated_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (title, content, now, now),
+                    )
+                    conn.commit()  # 每首立即 commit，避免重載時丟失資料
+                    inserted += 1
+                    print(f"[raspomushi] [{i+1}/{len(unique_ids)}] 新增：{title}", flush=True)
+                except Exception as e:
+                    errors.append({'title': title, 'error': str(e)})
+
+            time.sleep(UTA_NET_REQUEST_DELAY)
+
+        conn.close()
+        print(f"[raspomushi] 檢查完成：找到 {len(unique_ids)} 首，新增 {inserted} 首，跳過 {skipped} 首", flush=True)
+
+    except Exception as e:
+        print(f"[raspomushi] 檢查新歌錯誤：{e}", flush=True)
+    finally:
+        # 確保無論如何都會重置標記
+        if hasattr(check_new_songs, '_running'):
+            check_new_songs._running = False
+
+
+@app.route('/api/check-new-songs', methods=['POST'])
+def check_new_songs():
+    """檢查 uta-net 是否有新歌（資料庫中還沒有的），並自動爬取寫入（非同步背景執行）"""
+    # 檢查是否已有爬蟲在執行
+    if hasattr(check_new_songs, '_running') and check_new_songs._running:
+        return jsonify({
+            'success': False,
+            'error': '檢查新歌正在執行中，請稍候'
+        }), 409
+
+    # 啟動背景執行
+    check_new_songs._running = True
+    thread = threading.Thread(target=_do_check_new_songs, daemon=True)
+    thread.start()
+
     return jsonify({
         'success': True,
-        'deleted_count': count
+        'message': '已開始檢查新歌，請稍候數分鐘後重新整理頁面查看結果'
     })
 
 
@@ -395,7 +541,7 @@ def api_rasword_add_word():
                 )
     except Exception as e:
         # 檢查失敗不致命，繼續嘗試生成
-        print(f"[rasporuno] rasword /api/words/check 失敗: {e}")
+        print(f"[raspomushi] rasword /api/words/check 失敗: {e}")
 
     # 2) 呼叫 rasword 的 /api/generate，用 rasword 內建的 GEMINI_API_KEY
     try:
@@ -477,4 +623,4 @@ def api_rasword_add_word():
 
 if __name__ == '__main__':
     init_db()
-    app.run(host='0.0.0.0', port=5002, debug=True)
+    app.run(host='0.0.0.0', port=5003, debug=True)
