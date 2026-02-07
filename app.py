@@ -301,6 +301,36 @@ def delete_all_lyrics():
     })
 
 
+# Apple Music 搜尋用藝人（本實例僅收錄 ポルノグラフティ）
+APPLE_MUSIC_ARTIST = "ポルノグラフティ"
+
+
+@app.route('/api/apple-music-link', methods=['GET'])
+def get_apple_music_link():
+    """依歌名（+ 固定藝人）查 iTunes Search API，回傳 Apple Music 播放連結"""
+    title = (request.args.get('title') or request.args.get('q') or '').strip()
+    if not title:
+        return jsonify({'ok': False, 'url': None, 'error': 'missing title'}), 400
+    term = f"{title} {APPLE_MUSIC_ARTIST}"
+    try:
+        r = requests.get(
+            'https://itunes.apple.com/search',
+            params={'term': term, 'media': 'music', 'limit': 1, 'country': 'tw'},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        results = data.get('results') or []
+        if not results:
+            return jsonify({'ok': False, 'url': None})
+        url = results[0].get('trackViewUrl')
+        if not url:
+            return jsonify({'ok': False, 'url': None})
+        return jsonify({'ok': True, 'url': url})
+    except Exception as e:
+        return jsonify({'ok': False, 'url': None, 'error': str(e)}), 500
+
+
 @app.route('/api/furigana', methods=['GET'])
 def get_furigana():
     """取得日文詞的假名讀音"""

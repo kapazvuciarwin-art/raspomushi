@@ -283,6 +283,10 @@
         <div id="lyric-detail-card" class="card" style="display: none;">
             <h2 id="lyric-detail-title"></h2>
             <div class="lyric-date" id="lyric-detail-date"></div>
+            <div style="margin-bottom: 12px;">
+                <button type="button" class="btn btn-primary btn-small" id="apple-music-play-btn" onclick="openAppleMusic()" title="以歌名在 Apple Music 搜尋並開啟播放">在 Apple Music 播放</button>
+                <span id="apple-music-status" style="margin-left: 8px; font-size: 0.9rem; color: #888;"></span>
+            </div>
             <div class="lyric-full" id="lyric-detail-content"></div>
             <button class="btn btn-secondary" onclick="hideLyricDetail()" style="margin-top: 12px;">返回列表</button>
         </div>
@@ -451,6 +455,7 @@
                 document.getElementById('lyric-detail-title').textContent = lyric.title;
                 const date = new Date(lyric.updated_at).toLocaleString('zh-TW');
                 document.getElementById('lyric-detail-date').textContent = `更新時間：${date}`;
+                document.getElementById('apple-music-status').textContent = '';
                 
                 // 斷詞並顯示（不包裝成按鈕，保持原始文字樣式）
                 const segmentedContent = await segmentAndRenderLyric(lyric.content);
@@ -488,6 +493,27 @@
                 document.getElementById('lyric-detail-card').style.display = 'block';
             } catch (error) {
                 alert('載入失敗：' + error.message);
+            }
+        }
+
+        async function openAppleMusic() {
+            const title = document.getElementById('lyric-detail-title').textContent.trim();
+            const statusEl = document.getElementById('apple-music-status');
+            statusEl.textContent = '';
+            if (!title) {
+                statusEl.textContent = '請先選擇歌詞';
+                return;
+            }
+            try {
+                const res = await fetch('/api/apple-music-link?title=' + encodeURIComponent(title));
+                const data = await res.json();
+                if (data.ok && data.url) {
+                    window.open(data.url, '_blank');
+                } else {
+                    statusEl.textContent = '找不到對應歌曲';
+                }
+            } catch (e) {
+                statusEl.textContent = '查詢失敗';
             }
         }
 
