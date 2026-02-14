@@ -355,7 +355,7 @@
                     html += `
                         <li>
                             <div class="lyric-title-row">
-                                <button type="button" class="lyric-title-btn" onclick="showLyricDetail(${lyric.id})">${escapeHtml(lyric.title)}</button>
+                                <button type="button" class="lyric-title-btn" onclick="showLyricDetail(${lyric.id}, true)">${escapeHtml(lyric.title)}</button>
                                 <button type="button" class="btn btn-danger lyric-list-delete" onclick="deleteLyric(${lyric.id})">刪除</button>
                             </div>
                             <div style="font-size: 0.8rem; color: #888; margin-bottom: 8px;">
@@ -423,7 +423,7 @@
         }
 
         // 顯示歌詞詳情
-        async function showLyricDetail(id) {
+        async function showLyricDetail(id, pushState = true) {
             try {
                 const response = await fetch(`/api/lyrics/${id}`);
                 const lyric = await response.json();
@@ -433,8 +433,15 @@
                     return;
                 }
                 
-                document.getElementById('lyric-detail-title').textContent = lyric.title;
+                const title = lyric.title;
+                document.getElementById('lyric-detail-title').textContent = title;
                 document.getElementById('apple-music-status').textContent = '';
+                
+                // 使用 History API 更新 URL
+                if (pushState) {
+                    window.history.pushState({ lyricId: id, view: 'detail' }, title, `/#lyric/${id}`);
+                    document.title = `${title} - raspomushi`;
+                }
                 
                 // 斷詞並顯示（不包裝成按鈕，保持原始文字樣式）
                 const segmentedContent = await segmentAndRenderLyric(lyric.content);
@@ -497,9 +504,20 @@
         }
 
         // 隱藏歌詞詳情
-        function hideLyricDetail() {
+        function showHomeView(pushState = true) {
+            // 隱藏詳情頁，顯示列表
             document.getElementById('lyric-detail-card').style.display = 'none';
             document.getElementById('list-tab').classList.add('active');
+            document.title = 'raspomushi － 日文歌詞瀏覽';
+            
+            // 更新 URL
+            if (pushState) {
+                window.history.pushState({ view: 'home' }, 'raspomushi', '/');
+            }
+        }
+        
+        function hideLyricDetail() {
+            showHomeView();
         }
 
         // 刪除歌詞
@@ -641,16 +659,95 @@
             return `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(r)})</span>${extendBtn}`;
         }
 
+        function adjustFuriganaPosition() {
+            // 重新調整彈出框位置，確保不超出邊界
+            if (!furiganaPop || furiganaPop.style.display === 'none') return;
+            
+            const popRect = furiganaPop.getBoundingClientRect();
+            const popWidth = popRect.width;
+            const popHeight = popRect.height;
+            const margin = 16;
+            
+            let leftPos = parseFloat(furiganaPop.style.left) || 0;
+            let topPos = parseFloat(furiganaPop.style.top) || 0;
+            
+            // 檢查並調整右側邊界
+            if (leftPos + popWidth > window.innerWidth - margin) {
+                leftPos = window.innerWidth - popWidth - margin;
+            }
+            
+            // 檢查並調整左側邊界
+            if (leftPos < margin) {
+                leftPos = margin;
+            }
+            
+            // 檢查並調整底部邊界
+            if (topPos + popHeight > window.innerHeight - margin) {
+                topPos = window.innerHeight - popHeight - margin;
+            }
+            
+            // 檢查並調整頂部邊界
+            if (topPos < margin) {
+                topPos = margin;
+            }
+            
+            furiganaPop.style.left = leftPos + 'px';
+            furiganaPop.style.top = topPos + 'px';
+        }
+
         async function showFuriganaAt(x, y, word, contextText, contextOffset) {
             if (!word) return;
             hideFurigana();
             currentWord = word;
             currentContextText = typeof contextText === 'string' ? contextText : '';
             currentContextOffset = typeof contextOffset === 'number' ? contextOffset : 0;
-            furiganaPop.style.left = Math.min(x + 12, window.innerWidth - 30) + 'px';
-            furiganaPop.style.top = Math.min(y + 8, window.innerHeight - 30) + 'px';
+            
+            // 先設置內容並顯示（使用臨時位置避免閃爍）
+            furiganaPop.style.left = '-9999px';
+            furiganaPop.style.top = '-9999px';
             furiganaPop.style.display = 'block';
             furiganaPop.innerHTML = furiganaFirstLineHtml(word, null, true);
+            
+            // 獲取彈出框的實際尺寸
+            const popRect = furiganaPop.getBoundingClientRect();
+            const popWidth = popRect.width;
+            const popHeight = popRect.height;
+            
+            // 計算位置，確保不超出螢幕邊界
+            const offsetX = 12;
+            const offsetY = 8;
+            const margin = 16; // 安全邊距
+            
+            let leftPos = x + offsetX;
+            let topPos = y + offsetY;
+            
+            // 檢查右側邊界：如果會超出，調整到左側
+            if (leftPos + popWidth > window.innerWidth - margin) {
+                leftPos = x - popWidth - offsetX;
+                // 如果左側也超出，則強制靠右對齊
+                if (leftPos < margin) {
+                    leftPos = window.innerWidth - popWidth - margin;
+                }
+            }
+            
+            // 確保不超出左側邊界
+            leftPos = Math.max(margin, leftPos);
+            
+            // 檢查底部邊界：如果會超出，調整到上方
+            if (topPos + popHeight > window.innerHeight - margin) {
+                topPos = y - popHeight - offsetY;
+                // 如果上方也超出，則強制靠下對齊
+                if (topPos < margin) {
+                    topPos = window.innerHeight - popHeight - margin;
+                }
+            }
+            
+            // 確保不超出頂部邊界
+            topPos = Math.max(margin, topPos);
+            
+            // 應用計算後的位置
+            furiganaPop.style.left = leftPos + 'px';
+            furiganaPop.style.top = topPos + 'px';
 
             furiganaAbort = new AbortController();
             try {
@@ -658,6 +755,7 @@
                 const data = await res.json();
                 if (!data || !data.ok) {
                     furiganaPop.innerHTML = furiganaFirstLineHtml(word, '查詢失敗', false);
+                    setTimeout(adjustFuriganaPosition, 0);
                     return;
                 }
                 currentReading = (data.reading || '').trim() || '無';
@@ -666,9 +764,12 @@
                 } else {
                     furiganaPop.innerHTML = furiganaFirstLineHtml(word, '無讀音', false);
                 }
+                // 內容更新後重新調整位置
+                setTimeout(adjustFuriganaPosition, 0);
             } catch (e) {
                 if (e.name === 'AbortError') return;
                 furiganaPop.innerHTML = furiganaFirstLineHtml(word, '查詢失敗', false);
+                setTimeout(adjustFuriganaPosition, 0);
             }
         }
 
@@ -711,6 +812,8 @@
                     }
                 } catch (e) { /* skip */ }
             }
+            // 內容更新後重新調整位置
+            setTimeout(adjustFuriganaPosition, 0);
         }
 
         // 新增單字到 rasword
@@ -807,8 +910,40 @@
         });
 
         // 頁面載入時載入列表
+        // 處理瀏覽器的前進/後退按鈕
+        window.addEventListener('popstate', function(event) {
+            if (event.state && event.state.view === 'detail' && event.state.lyricId) {
+                // 從歷史記錄恢復詳情頁
+                showLyricDetail(event.state.lyricId, false);
+            } else {
+                // 返回首頁
+                showHomeView(false);
+            }
+        });
+
+        // 處理頁面載入時的 URL hash
+        function handleInitialRoute() {
+            const hash = window.location.hash;
+            const match = hash.match(/^#lyric\/(\d+)$/);
+            if (match) {
+                const lyricId = parseInt(match[1]);
+                // 先載入列表，然後顯示詳情
+                loadLyricsList().then(() => {
+                    showLyricDetail(lyricId, false);
+                });
+            } else {
+                // 確保初始狀態是首頁
+                if (window.history.state === null) {
+                    window.history.replaceState({ view: 'home' }, 'raspomushi', '/');
+                }
+                showHomeView(false);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
-            loadLyricsList();
+            loadLyricsList().then(() => {
+                handleInitialRoute();
+            });
         });
     </script>
 </body>
