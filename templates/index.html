@@ -287,11 +287,10 @@
                         <option value="popular">點閱次數</option>
                         <option value="words">單字數</option>
                     </select>
-                    <button type="button" class="btn btn-success" id="check-new-songs-btn" onclick="checkNewSongs()" style="flex-shrink: 0;">
-                        🔍 檢查新歌
-                    </button>
+                    <a href="/settings" class="btn btn-success" style="flex-shrink: 0; text-decoration: none; display: inline-block;">
+                        ⚙️ 設定
+                    </a>
                 </div>
-                <div id="check-new-songs-status" style="margin-bottom: 12px;"></div>
                 <div id="lyrics-list-container">
                     <p style="color: #888; text-align: center;">載入中...</p>
                 </div>
@@ -301,12 +300,37 @@
         <!-- 歌詞詳情頁面（動態顯示） -->
         <div id="lyric-detail-card" class="card" style="display: none;">
             <h2 id="lyric-detail-title"></h2>
-            <div style="margin-bottom: 12px;">
+            <div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                 <button type="button" class="btn btn-primary btn-small" id="apple-music-play-btn" onclick="openAppleMusic()" title="以歌名在 Apple Music 搜尋並開啟播放">在 Apple Music 播放</button>
-                <span id="apple-music-status" style="margin-left: 8px; font-size: 0.9rem; color: #888;"></span>
+                <button type="button" class="btn btn-success btn-small" id="translate-btn" onclick="showTranslateDialog()">🌐 翻譯</button>
+                <button type="button" class="btn btn-secondary btn-small" id="show-translation-btn" onclick="showLatestTranslation()">📖 顯示翻譯</button>
+                <span id="apple-music-status" style="font-size: 0.9rem; color: #888;"></span>
+            </div>
+            <div id="translation-versions" style="margin-bottom: 12px; display: none;">
+                <label style="display: block; margin-bottom: 6px; color: #bbb; font-size: 0.9rem;">選擇翻譯版本：</label>
+                <select id="translation-version-select" onchange="loadTranslation()" style="padding: 6px 10px; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: rgba(0,0,0,0.2); color: #fff; font-size: 0.9rem;">
+                    <option value="">-- 選擇版本 --</option>
+                </select>
             </div>
             <div class="lyric-full" id="lyric-detail-content"></div>
+            <div id="translation-content" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); line-height: 1.5;"></div>
             <button class="btn btn-secondary" onclick="hideLyricDetail()" style="margin-top: 12px;">返回列表</button>
+        </div>
+        
+        <!-- 翻譯對話框 -->
+        <div id="translate-dialog" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
+            <div style="background: rgba(30,30,40,0.95); padding: 24px; border-radius: 12px; max-width: 500px; width: 90%; border: 1px solid rgba(255,255,255,0.1);">
+                <h3 style="color: #aaccff; margin-bottom: 16px;">新增翻譯</h3>
+                <div class="form-group">
+                    <label style="color: #bbb; font-size: 0.9rem;">版本名稱（可選）</label>
+                    <input type="text" id="translation-version-name" placeholder="例如：第一版、GPT翻譯、Gemini翻譯" style="width: 100%; padding: 10px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: #fff;">
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                    <button class="btn btn-secondary" onclick="closeTranslateDialog()">取消</button>
+                    <button class="btn btn-primary" onclick="startTranslation()">開始翻譯</button>
+                </div>
+                <div id="translate-status" style="margin-top: 12px;"></div>
+            </div>
         </div>
     </div>
 
@@ -477,9 +501,242 @@
                 
                 document.getElementById('list-tab').classList.remove('active');
                 document.getElementById('lyric-detail-card').style.display = 'block';
+                
+                // 清除之前的翻譯顯示
+                document.getElementById('translation-content').style.display = 'none';
+                document.getElementById('translation-content').innerHTML = '';
+                document.getElementById('translation-versions').style.display = 'none';
+                document.getElementById('translation-version-select').innerHTML = '<option value="">-- 選擇版本 --</option>';
+                currentTranslation = null;
+                
+                // 載入翻譯版本列表
+                currentLyricId = id;
+                loadTranslationVersions();
             } catch (error) {
                 alert('載入失敗：' + error.message);
             }
+        }
+        
+        let currentLyricId = null;
+        let currentTranslation = null;
+        
+        async function loadTranslationVersions() {
+            if (!currentLyricId) return;
+            
+            try {
+                const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
+                const translations = await res.json();
+                
+                const selectEl = document.getElementById('translation-version-select');
+                selectEl.innerHTML = '<option value="">-- 選擇版本 --</option>';
+                
+                if (translations.length > 0) {
+                    document.getElementById('translation-versions').style.display = 'block';
+                    translations.forEach(t => {
+                        const option = document.createElement('option');
+                        option.value = t.id;
+                        option.textContent = `${t.version_name} (${new Date(t.created_at).toLocaleString('zh-TW')})`;
+                        selectEl.appendChild(option);
+                    });
+                } else {
+                    document.getElementById('translation-versions').style.display = 'none';
+                }
+            } catch (e) {
+                console.error('載入翻譯版本失敗:', e);
+            }
+        }
+        
+        async function loadTranslation() {
+            const translationId = document.getElementById('translation-version-select').value;
+            if (!translationId) {
+                document.getElementById('translation-content').style.display = 'none';
+                currentTranslation = null;
+                return;
+            }
+            
+            try {
+                const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
+                const translations = await res.json();
+                const translation = translations.find(t => t.id == translationId);
+                
+                if (translation) {
+                    currentTranslation = translation;
+                    renderTranslation(translation.translation_data);
+                    document.getElementById('translation-content').style.display = 'block';
+                    // 記錄這次查看的翻譯版本
+                    localStorage.setItem(`lastTranslation_${currentLyricId}`, translation.id);
+                }
+            } catch (e) {
+                console.error('載入翻譯失敗:', e);
+                alert('載入翻譯失敗：' + e.message);
+            }
+        }
+        
+        function renderTranslation(translationData) {
+            // 解析翻譯數據（格式：原文：日文\n翻譯：中文）
+            const lines = translationData.split('\n');
+            const translationPairs = [];
+            let currentPair = null;
+            
+            // 將原文和翻譯配對
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                if (line.startsWith('原文：')) {
+                    // 如果已有配對，先保存
+                    if (currentPair) {
+                        translationPairs.push(currentPair);
+                    }
+                    const original = line.substring(3).trim();
+                    currentPair = { original, translated: null };
+                } else if (line.startsWith('翻譯：')) {
+                    const translated = line.substring(3).trim();
+                    if (currentPair) {
+                        currentPair.translated = translated;
+                    } else {
+                        // 如果沒有原文，單獨處理
+                        currentPair = { original: null, translated };
+                    }
+                }
+            }
+            // 保存最後一對
+            if (currentPair) {
+                translationPairs.push(currentPair);
+            }
+            
+            // 渲染配對的原文和翻譯
+            const translationHtml = translationPairs.map((pair, index) => {
+                const isLast = index === translationPairs.length - 1;
+                const pairMarginBottom = isLast ? '0' : '10px'; // 組合之間稍微大一點的行距（與原始歌詞一致）
+                
+                let html = '';
+                if (pair.original) {
+                    html += `<div class="translation-original-line" style="line-height: 1.5; margin-bottom: 0;"><strong style="color: #bcd7ff;">原文：</strong><span class="translation-original-text" style="color: #ddd; cursor: pointer;">${escapeHtml(pair.original)}</span></div>`;
+                }
+                if (pair.translated) {
+                    html += `<div class="translation-translated-line" style="line-height: 1.5; margin-bottom: ${pairMarginBottom}; padding-left: 20px;"><strong style="color: #90ee90;">翻譯：</strong><span style="color: #e0e0e0;">${escapeHtml(pair.translated)}</span></div>`;
+                }
+                return html;
+            }).join('');
+            
+            const translationContentEl = document.getElementById('translation-content');
+            translationContentEl.innerHTML = translationHtml;
+            
+            // 為原文部分添加點擊事件監聽器
+            const originalTextElements = translationContentEl.querySelectorAll('.translation-original-text');
+            originalTextElements.forEach(el => {
+                el.addEventListener('click', function handleOriginalTextClick(ev) {
+                    // 如果點擊的是假名彈窗，不處理
+                    if (ev.target.closest('.furigana-pop')) return;
+                    
+                    // 如果點擊的是按鈕或其他元素，不處理
+                    if (ev.target.tagName === 'BUTTON' || ev.target.closest('button')) return;
+                    
+                    const range = caretRangeFromPoint(ev.clientX, ev.clientY);
+                    if (!range) return;
+                    
+                    const node = range.startContainer;
+                    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+                    
+                    const word = pickWordFromTextNode(node.textContent || '', range.startOffset);
+                    if (!word) return;
+                    
+                    ev.stopPropagation();
+                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset);
+                });
+            });
+        }
+        
+        async function showLatestTranslation() {
+            if (!currentLyricId) return;
+            
+            try {
+                const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
+                const translations = await res.json();
+                
+                if (translations.length === 0) {
+                    alert('此歌詞尚無翻譯，請先點擊「翻譯」按鈕生成翻譯');
+                    return;
+                }
+                
+                // 選擇最近一次看過的翻譯版本，如果沒有則選擇最新生成的
+                let selectedTranslation = null;
+                const lastViewedId = localStorage.getItem(`lastTranslation_${currentLyricId}`);
+                if (lastViewedId) {
+                    selectedTranslation = translations.find(t => t.id == lastViewedId);
+                }
+                
+                // 如果沒有找到上次查看的版本，使用最新的
+                if (!selectedTranslation) {
+                    selectedTranslation = translations[0]; // 已經按 created_at DESC 排序
+                }
+                
+                // 更新選擇器
+                document.getElementById('translation-version-select').value = selectedTranslation.id;
+                
+                // 載入並顯示翻譯
+                currentTranslation = selectedTranslation;
+                renderTranslation(selectedTranslation.translation_data);
+                document.getElementById('translation-content').style.display = 'block';
+                document.getElementById('translation-versions').style.display = 'block';
+                
+                // 記錄這次查看的翻譯版本
+                localStorage.setItem(`lastTranslation_${currentLyricId}`, selectedTranslation.id);
+            } catch (e) {
+                console.error('載入翻譯失敗:', e);
+                alert('載入翻譯失敗：' + e.message);
+            }
+        }
+        
+        function showTranslateDialog() {
+            document.getElementById('translate-dialog').style.display = 'flex';
+            document.getElementById('translation-version-name').value = '';
+            document.getElementById('translate-status').innerHTML = '';
+        }
+        
+        function closeTranslateDialog() {
+            document.getElementById('translate-dialog').style.display = 'none';
+        }
+        
+        async function startTranslation() {
+            const versionName = document.getElementById('translation-version-name').value.trim() || '預設版本';
+            const statusEl = document.getElementById('translate-status');
+            
+            statusEl.innerHTML = '<div class="msg info">正在翻譯，請稍候...</div>';
+            
+            try {
+                const res = await fetch(`/api/lyrics/${currentLyricId}/translate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version_name: versionName })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    statusEl.innerHTML = '<div class="msg success">✅ 翻譯完成！使用的模型：' + escapeHtml(data.model_used) + '</div>';
+                    setTimeout(() => {
+                        closeTranslateDialog();
+                        loadTranslationVersions();
+                        // 自動選擇並顯示新翻譯
+                        document.getElementById('translation-version-select').value = data.translation_id;
+                        loadTranslation();
+                        // 記錄這次查看的翻譯版本
+                        localStorage.setItem(`lastTranslation_${currentLyricId}`, data.translation_id);
+                    }, 1500);
+                } else {
+                    statusEl.innerHTML = '<div class="msg error">❌ 翻譯失敗：' + escapeHtml(data.error || '未知錯誤') + '</div>';
+                }
+            } catch (e) {
+                statusEl.innerHTML = '<div class="msg error">❌ 翻譯失敗：' + escapeHtml(e.message) + '</div>';
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         async function openAppleMusic() {

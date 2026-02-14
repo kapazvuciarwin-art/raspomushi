@@ -22,6 +22,26 @@ DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raspomushi.
 # rasword 單字庫服務：預設跑在本機 5000 port，可用環境變數覆蓋
 RASWORD_BASE_URL = os.getenv("RASWORD_BASE_URL", "http://127.0.0.1:5000")
 
+# AI API 設定
+GEMINI_MODEL_PRIORITY = [
+    "gemini-3.0-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash-preview-05-20",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+# 保留此列表用於向後兼容，實際使用 preferred_models 和 fallback_models
+GROQ_FREE_MODELS = [
+    "gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-8b-instruct",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+]
+
 # uta-net 爬蟲設定
 UTA_NET_BASE_URL = "https://www.uta-net.com"
 UTA_NET_ARTIST_ID = 1686  # ポルノグラフィティ
@@ -98,6 +118,22 @@ def get_db():
     return conn
 
 
+def _get_setting(key):
+    """取得設定值"""
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def _set_setting(key, value):
+    """設定值"""
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
+
 def init_db():
     conn = get_db()
     conn.execute("""
@@ -125,6 +161,24 @@ def init_db():
         conn.execute("ALTER TABLE lyrics ADD COLUMN saved_word_count INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # 欄位已存在
+    
+    # 設定表（用於存儲 AI API 設定）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)
+    """)
+    
+    # 翻譯表（存儲多個版本的翻譯）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS translations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lyric_id INTEGER NOT NULL,
+            version_name TEXT NOT NULL,
+            translation_data TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (lyric_id) REFERENCES lyrics(id) ON DELETE CASCADE
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -425,6 +479,11 @@ def _do_check_new_songs():
             check_new_songs._running = False
 
 
+@app.route('/settings')
+def settings():
+    return render_template('settings.html')
+
+
 @app.route('/api/check-new-songs', methods=['POST'])
 def check_new_songs():
     """檢查 uta-net 是否有新歌（資料庫中還沒有的），並自動爬取寫入（非同步背景執行）"""
@@ -501,6 +560,262 @@ def segment_text():
     
     segments = segment_japanese_text(text)
     return jsonify({'ok': True, 'segments': segments})
+
+
+def call_gemini(api_key, prompt):
+    """Gemini：依優先順序嘗試模型。"""
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        raise RuntimeError("請安裝：pip install google-generativeai")
+    genai.configure(api_key=api_key)
+    last_err = None
+    for model_name in GEMINI_MODEL_PRIORITY:
+        try:
+            model = genai.GenerativeModel(model_name)
+            r = model.generate_content(prompt)
+            return (r.text or "").strip(), model_name
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Gemini 無可用模型：{last_err}")
+
+
+def call_groq(api_key, prompt):
+    """Groq：優先使用 gpt-oss-120b，找不到則嘗試其他免費模型。會嘗試所有模型直到找到可用的。"""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    errors = []  # 記錄所有錯誤
+    
+    # 優先嘗試 gpt-oss-120b
+    preferred_models = [
+        "gpt-oss-120b",
+    ]
+    
+    # 其他免費模型作為備選
+    fallback_models = [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instruct",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+    ]
+    
+    # 合併所有模型列表
+    all_models = preferred_models + fallback_models
+    
+    # 嘗試所有模型
+    for model in all_models:
+        try:
+            r = requests.post(
+                GROQ_API_URL,
+                headers=headers,
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                },
+                timeout=60,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if "choices" in data and data["choices"]:
+                    text = data["choices"][0].get("message", {}).get("content", "")
+                    if text and text.strip():
+                        return (text.strip(), model)
+                    else:
+                        errors.append(f"{model}: 返回空內容")
+            else:
+                # 記錄錯誤
+                try:
+                    error_data = r.json()
+                    if "error" in error_data:
+                        error_msg = error_data['error'].get('message', str(r.status_code))
+                        errors.append(f"{model}: {error_msg}")
+                    else:
+                        errors.append(f"{model}: HTTP {r.status_code} - {r.text[:100]}")
+                except:
+                    errors.append(f"{model}: HTTP {r.status_code} - {r.text[:100] if r.text else '無回應'}")
+        except Exception as e:
+            errors.append(f"{model}: {str(e)}")
+            continue
+    
+    # 所有模型都失敗
+    error_summary = "\n".join(errors[:10])  # 最多顯示前10個錯誤
+    if len(errors) > 10:
+        error_summary += f"\n... 還有 {len(errors) - 10} 個模型失敗"
+    
+    error_summary += "\n\n建議：如果 Groq 模型都不可用，請考慮使用 AI Studio (Gemini) API。"
+    
+    raise RuntimeError(f"Groq 所有模型都失敗（已嘗試 {len(all_models)} 個模型）：\n{error_summary}")
+
+
+def translate_japanese_to_chinese(text, api_provider, api_key):
+    """
+    將日文逐句翻譯成繁體中文。
+    返回格式：每行一個句子，原文和翻譯對照。
+    """
+    # 將文本按行分割，保留原始結構
+    lines = text.split('\n')
+    sentences = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            sentences.append('')
+            continue
+        # 按句號、問號、驚嘆號分割
+        parts = re.split(r'([。！？])', line)
+        current = ''
+        for i, part in enumerate(parts):
+            current += part
+            if part in ['。', '！', '？']:
+                if current.strip():
+                    sentences.append(current.strip())
+                current = ''
+        if current.strip():
+            sentences.append(current.strip())
+    
+    # 過濾空句子
+    sentences = [s for s in sentences if s.strip()]
+    
+    # 構建翻譯提示
+    prompt = """請將以下日文歌詞逐句翻譯成繁體中文。請保持原文的格式和結構，每行一個句子，格式如下：
+
+原文：日文句子
+翻譯：中文翻譯
+
+請確保翻譯準確、自然、符合中文表達習慣，並且逐句對照。以下是需要翻譯的內容：
+
+""" + '\n'.join(sentences)
+    
+    try:
+        if api_provider == 'gemini':
+            result, model = call_gemini(api_key, prompt)
+        elif api_provider == 'groq':
+            result, model = call_groq(api_key, prompt)
+        else:
+            raise ValueError(f"不支援的 API 提供者：{api_provider}")
+        
+        return result, model
+    except Exception as e:
+        raise RuntimeError(f"翻譯失敗：{str(e)}")
+
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """取得 AI API 設定"""
+    api_provider = _get_setting('api_provider') or 'gemini'
+    gemini_api_key = _get_setting('gemini_api_key') or ''
+    groq_api_key = _get_setting('groq_api_key') or ''
+    return jsonify({
+        'api_provider': api_provider,
+        'gemini_api_key': gemini_api_key,
+        'groq_api_key': groq_api_key,
+    })
+
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """儲存 AI API 設定"""
+    data = request.get_json() or {}
+    api_provider = data.get('api_provider', 'gemini')
+    gemini_api_key = (data.get('gemini_api_key') or '').strip()
+    groq_api_key = (data.get('groq_api_key') or '').strip()
+    
+    _set_setting('api_provider', api_provider)
+    if gemini_api_key:
+        _set_setting('gemini_api_key', gemini_api_key)
+    if groq_api_key:
+        _set_setting('groq_api_key', groq_api_key)
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/lyrics/<int:lyric_id>/translate', methods=['POST'])
+def translate_lyric(lyric_id):
+    """翻譯歌詞"""
+    data = request.get_json() or {}
+    version_name = (data.get('version_name') or '').strip() or '預設版本'
+    
+    # 取得歌詞內容
+    conn = get_db()
+    lyric = conn.execute("SELECT content FROM lyrics WHERE id = ?", (lyric_id,)).fetchone()
+    conn.close()
+    
+    if not lyric:
+        return jsonify({'success': False, 'error': '找不到歌詞'}), 404
+    
+    # 取得 API 設定
+    api_provider = _get_setting('api_provider') or 'gemini'
+    if api_provider == 'gemini':
+        api_key = os.getenv("GEMINI_API_KEY") or _get_setting('gemini_api_key') or ''
+    else:
+        api_key = _get_setting('groq_api_key') or ''
+    
+    if not api_key:
+        return jsonify({'success': False, 'error': '請先在設定頁面配置 API Key'}), 400
+    
+    try:
+        # 執行翻譯
+        translation_text, model_used = translate_japanese_to_chinese(
+            lyric['content'], api_provider, api_key
+        )
+        
+        # 儲存翻譯
+        now = datetime.now().isoformat()
+        conn = get_db()
+        conn.execute(
+            """INSERT INTO translations (lyric_id, version_name, translation_data, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (lyric_id, version_name, translation_text, now)
+        )
+        conn.commit()
+        translation_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'translation_id': translation_id,
+            'translation': translation_text,
+            'model_used': model_used,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/lyrics/<int:lyric_id>/translations', methods=['GET'])
+def get_translations(lyric_id):
+    """取得歌詞的所有翻譯版本"""
+    conn = get_db()
+    translations = conn.execute(
+        """SELECT id, version_name, translation_data, created_at
+           FROM translations WHERE lyric_id = ? ORDER BY created_at DESC""",
+        (lyric_id,)
+    ).fetchall()
+    conn.close()
+    
+    result = []
+    for t in translations:
+        result.append({
+            'id': t['id'],
+            'version_name': t['version_name'],
+            'translation_data': t['translation_data'],
+            'created_at': t['created_at'],
+        })
+    
+    return jsonify(result)
+
+
+@app.route('/api/translations/<int:translation_id>', methods=['DELETE'])
+def delete_translation(translation_id):
+    """刪除翻譯版本"""
+    conn = get_db()
+    conn.execute("DELETE FROM translations WHERE id = ?", (translation_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
 
 
 @app.route('/api/rasword/add-word', methods=['POST'])

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設定 - raspomushi</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+            background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e8e8e8;
+            padding: 16px;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+        h1 {
+            font-weight: 700;
+            color: #eee;
+            font-size: 1.5rem;
+        }
+        .btn-back {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+        }
+        .btn-back:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .card {
+            background: rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .card h2 {
+            margin-bottom: 16px;
+            font-size: 1.1rem;
+            color: #aaccff;
+        }
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: #bbb;
+            font-size: 0.9rem;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            color: #fff;
+            font-size: 1rem;
+        }
+        .form-group input::placeholder {
+            color: #888;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%);
+            color: #fff;
+        }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-success {
+            background: #28a745;
+            color: #fff;
+        }
+        .btn-success:hover { opacity: 0.9; }
+        .msg {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 0.9rem;
+        }
+        .msg.success {
+            background: rgba(40, 167, 69, 0.2);
+            border: 1px solid rgba(40, 167, 69, 0.4);
+            color: #90ee90;
+        }
+        .msg.error {
+            background: rgba(220, 53, 69, 0.2);
+            border: 1px solid rgba(220, 53, 69, 0.4);
+            color: #ffaaaa;
+        }
+        .msg.info {
+            background: rgba(23, 162, 184, 0.2);
+            border: 1px solid rgba(23, 162, 184, 0.4);
+            color: #aaccff;
+        }
+        #api-provider-gemini, #api-provider-groq {
+            display: none;
+        }
+        #api-provider-gemini.active, #api-provider-groq.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ 設定</h1>
+            <a href="/" class="btn-back">← 返回首頁</a>
+        </div>
+
+        <div class="card">
+            <h2>AI API 設定</h2>
+            <p style="color: #888; font-size: 0.9rem; margin-bottom: 14px;">
+                建議優先使用 <strong>AI Studio (Gemini)</strong>，穩定且免費額度較高。
+                Groq 提供快速免費的模型，優先使用 gpt-oss-120b，失敗時會自動嘗試其他模型。
+            </p>
+            <div id="api-settings-status"></div>
+            <form id="api-settings-form" onsubmit="saveApiSettings(event)">
+                <div class="form-group">
+                    <label>API 提供者</label>
+                    <select id="api-provider" name="api_provider" onchange="setApiProviderUI()">
+                        <option value="gemini">AI Studio (Gemini) - 推薦</option>
+                        <option value="groq">Groq</option>
+                    </select>
+                </div>
+                
+                <div id="api-provider-gemini" class="active">
+                    <div class="form-group">
+                        <label>Gemini API Key</label>
+                        <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="輸入 Gemini API Key">
+                        <small style="color: #888; font-size: 0.85rem; display: block; margin-top: 4px;">
+                            取得方式：<a href="https://aistudio.google.com/apikey" target="_blank" style="color: #6ea8fe;">https://aistudio.google.com/apikey</a>
+                        </small>
+                    </div>
+                </div>
+                
+                <div id="api-provider-groq">
+                    <div class="form-group">
+                        <label>Groq API Key</label>
+                        <input type="password" id="groq-api-key" name="groq_api_key" placeholder="輸入 Groq API Key">
+                        <small style="color: #888; font-size: 0.85rem; display: block; margin-top: 4px;">
+                            取得方式：<a href="https://console.groq.com/keys" target="_blank" style="color: #6ea8fe;">https://console.groq.com/keys</a>
+                            <br>優先使用 gpt-oss-120b 模型，失敗時會自動嘗試其他免費模型
+                        </small>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">儲存設定</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>檢查新歌</h2>
+            <div id="check-new-songs-status"></div>
+            <button type="button" class="btn btn-success" id="check-new-songs-btn" onclick="checkNewSongs()">
+                🔍 檢查新歌
+            </button>
+        </div>
+    </div>
+
+    <script>
+        function setApiProviderUI() {
+            const provider = document.getElementById('api-provider').value;
+            document.getElementById('api-provider-gemini').classList.toggle('active', provider === 'gemini');
+            document.getElementById('api-provider-groq').classList.toggle('active', provider === 'groq');
+        }
+
+        async function loadApiSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                document.getElementById('api-provider').value = data.api_provider || 'gemini';
+                document.getElementById('gemini-api-key').value = data.gemini_api_key || '';
+                document.getElementById('groq-api-key').value = data.groq_api_key || '';
+                setApiProviderUI();
+            } catch (e) {
+                console.error('載入設定失敗:', e);
+            }
+        }
+
+        async function saveApiSettings(event) {
+            event.preventDefault();
+            const statusEl = document.getElementById('api-settings-status');
+            const formData = {
+                api_provider: document.getElementById('api-provider').value,
+                gemini_api_key: document.getElementById('gemini-api-key').value,
+                groq_api_key: document.getElementById('groq-api-key').value,
+            };
+            
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    statusEl.innerHTML = '<div class="msg success">✅ 設定已儲存</div>';
+                } else {
+                    statusEl.innerHTML = '<div class="msg error">❌ 儲存失敗：' + (data.error || '未知錯誤') + '</div>';
+                }
+            } catch (e) {
+                statusEl.innerHTML = '<div class="msg error">❌ 儲存失敗：' + e.message + '</div>';
+            }
+        }
+
+        async function checkNewSongs() {
+            const btn = document.getElementById('check-new-songs-btn');
+            const statusEl = document.getElementById('check-new-songs-status');
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ 檢查中...';
+            statusEl.innerHTML = '<div class="msg info">正在檢查 uta-net 是否有新歌，請稍候（約需數分鐘）...</div>';
+            
+            try {
+                const response = await fetch('/api/check-new-songs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    statusEl.innerHTML = `<div class="msg success">✅ ${result.message || '檢查完成'}</div>`;
+                } else {
+                    statusEl.innerHTML = `<div class="msg error">❌ ${result.error || '檢查失敗'}</div>`;
+                }
+            } catch (error) {
+                statusEl.innerHTML = `<div class="msg error">❌ 檢查失敗：${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔍 檢查新歌';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setApiProviderUI();
+            loadApiSettings();
+        });
+    </script>
+</body>
+</html>
