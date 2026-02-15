@@ -269,6 +269,7 @@
 </head>
 <body>
     <div class="container">
+        <div id="myras-quick-nav" style="margin-bottom:14px; padding:10px; border-radius:10px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.16); font-size:0.9rem;"></div>
         <h1>🎵 raspomushi － 日文歌詞瀏覽</h1>
         <p style="text-align: center; color: #888; margin-bottom: 24px;">
             瀏覽歌詞、斷詞假名、關鍵字搜尋，並可將單字加入 rasword 單字庫（無手動輸入）
@@ -530,6 +531,8 @@
                 const selectEl = document.getElementById('translation-version-select');
                 selectEl.innerHTML = '<option value="">-- 選擇版本 --</option>';
                 
+                const translateBtn = document.getElementById('translate-btn');
+                
                 if (translations.length > 0) {
                     document.getElementById('translation-versions').style.display = 'block';
                     translations.forEach(t => {
@@ -538,8 +541,12 @@
                         option.textContent = `${t.version_name} (${new Date(t.created_at).toLocaleString('zh-TW')})`;
                         selectEl.appendChild(option);
                     });
+                    // 如果有翻譯，將「翻譯」按鈕改為「再翻譯」
+                    translateBtn.textContent = '🔄 再翻譯';
                 } else {
                     document.getElementById('translation-versions').style.display = 'none';
+                    // 如果沒有翻譯，保持「翻譯」按鈕
+                    translateBtn.textContent = '🌐 翻譯';
                 }
             } catch (e) {
                 console.error('載入翻譯版本失敗:', e);
@@ -561,7 +568,7 @@
                 
                 if (translation) {
                     currentTranslation = translation;
-                    renderTranslation(translation.translation_data);
+                    renderTranslation(translation.translation_data, translation.model_used || '');
                     document.getElementById('translation-content').style.display = 'block';
                     // 記錄這次查看的翻譯版本
                     localStorage.setItem(`lastTranslation_${currentLyricId}`, translation.id);
@@ -572,7 +579,7 @@
             }
         }
         
-        function renderTranslation(translationData) {
+        function renderTranslation(translationData, modelUsed = '') {
             // 解析翻譯數據（格式：原文：日文\n翻譯：中文）
             const lines = translationData.split('\n');
             const translationPairs = [];
@@ -605,8 +612,14 @@
                 translationPairs.push(currentPair);
             }
             
+            // 在翻譯內容最上方顯示模型信息
+            let translationHtml = '';
+            if (modelUsed) {
+                translationHtml += `<div style="margin-bottom: 12px; padding: 8px 12px; background: rgba(67, 97, 238, 0.15); border-left: 3px solid #4361ee; border-radius: 4px; font-size: 0.9rem; color: #aaccff;"><strong>🤖 翻譯模型：</strong><span style="color: #ddd;">${escapeHtml(modelUsed)}</span></div>`;
+            }
+            
             // 渲染配對的原文和翻譯
-            const translationHtml = translationPairs.map((pair, index) => {
+            translationHtml += translationPairs.map((pair, index) => {
                 const isLast = index === translationPairs.length - 1;
                 const pairMarginBottom = isLast ? '0' : '10px'; // 組合之間稍微大一點的行距（與原始歌詞一致）
                 
@@ -655,8 +668,53 @@
                 const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
                 const translations = await res.json();
                 
+                // 如果沒有翻譯，自動生成翻譯
                 if (translations.length === 0) {
-                    alert('此歌詞尚無翻譯，請先點擊「翻譯」按鈕生成翻譯');
+                    // 顯示載入狀態
+                    const showTranslationBtn = document.getElementById('show-translation-btn');
+                    const originalText = showTranslationBtn.textContent;
+                    showTranslationBtn.disabled = true;
+                    showTranslationBtn.textContent = '⏳ 生成翻譯中...';
+                    
+                    try {
+                        // 自動生成翻譯（使用預設版本名稱）
+                        const translateRes = await fetch(`/api/lyrics/${currentLyricId}/translate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ version_name: '預設版本' })
+                        });
+                        
+                        const translateData = await translateRes.json();
+                        
+                        if (translateData.success) {
+                            // 重新載入翻譯版本列表
+                            await loadTranslationVersions();
+                            
+                            // 載入並顯示新生成的翻譯
+                            const newRes = await fetch(`/api/lyrics/${currentLyricId}/translations`);
+                            const newTranslations = await newRes.json();
+                            
+                            if (newTranslations.length > 0) {
+                                const newTranslation = newTranslations[0]; // 最新的翻譯
+                                currentTranslation = newTranslation;
+                                renderTranslation(newTranslation.translation_data, newTranslation.model_used || '');
+                                document.getElementById('translation-content').style.display = 'block';
+                                document.getElementById('translation-versions').style.display = 'block';
+                                document.getElementById('translation-version-select').value = newTranslation.id;
+                                
+                                // 記錄這次查看的翻譯版本
+                                localStorage.setItem(`lastTranslation_${currentLyricId}`, newTranslation.id);
+                            }
+                        } else {
+                            alert('翻譯失敗：' + (translateData.error || '未知錯誤'));
+                        }
+                    } catch (e) {
+                        console.error('生成翻譯失敗:', e);
+                        alert('生成翻譯失敗：' + e.message);
+                    } finally {
+                        showTranslationBtn.disabled = false;
+                        showTranslationBtn.textContent = originalText;
+                    }
                     return;
                 }
                 
@@ -677,7 +735,7 @@
                 
                 // 載入並顯示翻譯
                 currentTranslation = selectedTranslation;
-                renderTranslation(selectedTranslation.translation_data);
+                renderTranslation(selectedTranslation.translation_data, selectedTranslation.model_used || '');
                 document.getElementById('translation-content').style.display = 'block';
                 document.getElementById('translation-versions').style.display = 'block';
                 
@@ -716,9 +774,10 @@
                 
                 if (data.success) {
                     statusEl.innerHTML = '<div class="msg success">✅ 翻譯完成！使用的模型：' + escapeHtml(data.model_used) + '</div>';
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         closeTranslateDialog();
-                        loadTranslationVersions();
+                        // 重新載入翻譯版本列表（會自動更新按鈕文字）
+                        await loadTranslationVersions();
                         // 自動選擇並顯示新翻譯
                         document.getElementById('translation-version-select').value = data.translation_id;
                         loadTranslation();
@@ -1202,6 +1261,30 @@
                 handleInitialRoute();
             });
         });
+
+        (function renderMyrasQuickNav() {
+            const mount = document.getElementById('myras-quick-nav');
+            if (!mount) return;
+            const base = `${window.location.protocol}//${window.location.hostname}:5010`;
+            fetch(`${base}/api/projects`)
+                .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+                .then(items => {
+                    const list = Array.isArray(items) ? items : [];
+                    if (!list.length) {
+                        mount.innerHTML = `<a href="${base}" style="color:#93c5fd;">回 myras</a>`;
+                        return;
+                    }
+                    const buttons = list.map(p => {
+                        const name = String(p.name || '未命名');
+                        const url = String(p.url || '#');
+                        return `<a href="${url}" style="display:inline-block; margin:4px 6px 0 0; padding:6px 10px; border-radius:8px; text-decoration:none; color:#fff; background:rgba(59,130,246,0.55); border:1px solid rgba(147,197,253,0.4);">${name}</a>`;
+                    }).join('');
+                    mount.innerHTML = buttons;
+                })
+                .catch(() => {
+                    mount.innerHTML = `<a href="${base}" style="color:#93c5fd;">回 myras</a>`;
+                });
+        })();
     </script>
 </body>
 </html>

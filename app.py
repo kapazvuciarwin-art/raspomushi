@@ -175,9 +175,15 @@ def init_db():
             version_name TEXT NOT NULL,
             translation_data TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            model_used TEXT,
             FOREIGN KEY (lyric_id) REFERENCES lyrics(id) ON DELETE CASCADE
         )
     """)
+    # 為現有資料庫新增欄位（如果不存在）
+    try:
+        conn.execute("ALTER TABLE translations ADD COLUMN model_used TEXT")
+    except sqlite3.OperationalError:
+        pass  # 欄位已存在
     
     conn.commit()
     conn.close()
@@ -767,9 +773,9 @@ def translate_lyric(lyric_id):
         now = datetime.now().isoformat()
         conn = get_db()
         conn.execute(
-            """INSERT INTO translations (lyric_id, version_name, translation_data, created_at)
-               VALUES (?, ?, ?, ?)""",
-            (lyric_id, version_name, translation_text, now)
+            """INSERT INTO translations (lyric_id, version_name, translation_data, created_at, model_used)
+               VALUES (?, ?, ?, ?, ?)""",
+            (lyric_id, version_name, translation_text, now, model_used)
         )
         conn.commit()
         translation_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -790,7 +796,7 @@ def get_translations(lyric_id):
     """取得歌詞的所有翻譯版本"""
     conn = get_db()
     translations = conn.execute(
-        """SELECT id, version_name, translation_data, created_at
+        """SELECT id, version_name, translation_data, created_at, model_used
            FROM translations WHERE lyric_id = ? ORDER BY created_at DESC""",
         (lyric_id,)
     ).fetchall()
@@ -803,6 +809,7 @@ def get_translations(lyric_id):
             'version_name': t['version_name'],
             'translation_data': t['translation_data'],
             'created_at': t['created_at'],
+            'model_used': t['model_used'] or '',
         })
     
     return jsonify(result)
