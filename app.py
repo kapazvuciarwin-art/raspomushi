@@ -2,7 +2,6 @@
 
 import os
 import re
-import sys
 import sqlite3
 import time
 import threading
@@ -13,6 +12,9 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
+
+from rascommon.furigana import to_furigana
+from rascommon.rasword_client import add_word_via_rasword
 
 load_dotenv()
 
@@ -55,62 +57,6 @@ UTA_NET_HEADERS = {
     "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "ja,en-US;q=0.7,en;q=0.3",
 }
-
-_TAGGER = None
-_KAKASI = None
-
-
-def _katakana_to_hiragana(s: str) -> str:
-    """UniDic 回傳片假名，轉成平假名。"""
-    if not s:
-        return s
-    result = []
-    for c in s:
-        code = ord(c)
-        # 片假名 U+30A1..U+30F6 → 平假名 U+3041..U+3096
-        if 0x30A1 <= code <= 0x30F6:
-            result.append(chr(code - 0x60))
-        else:
-            result.append(c)
-    return "".join(result)
-
-
-def to_furigana(text: str) -> str:
-    """
-    將日文（含漢字）轉成假名（平假名為主）。
-    優先使用 MeCab + UniDic（fugashi）以正確處理訓讀；失敗時 fallback pykakasi。
-    """
-    if not text:
-        return ""
-    # 1) MeCab + UniDic（fugashi）
-    try:
-        global _TAGGER
-        if _TAGGER is None:
-            from fugashi import Tagger
-            _TAGGER = Tagger()
-        parts = []
-        for word in _TAGGER(text):
-            kana = getattr(word.feature, "kana", None) or getattr(word.feature, "pron", None)
-            if kana:
-                parts.append(_katakana_to_hiragana(kana))
-            else:
-                parts.append(word.surface)
-        if parts:
-            return "".join(parts).strip()
-    except Exception:
-        pass
-    # 2) fallback: pykakasi
-    global _KAKASI
-    if _KAKASI is None:
-        from pykakasi import kakasi
-        k = kakasi()
-        k.setMode("J", "H")
-        k.setMode("K", "H")
-        k.setMode("H", "H")
-        k.setMode("r", "Hepburn")
-        _KAKASI = k.getConverter()
-    return (_KAKASI.do(text) or "").strip()
-
 
 def get_db():
     conn = sqlite3.connect(DATABASE)
@@ -833,114 +779,13 @@ def api_rasword_add_word():
     """
     data = request.get_json() or {}
     word = (data.get("word") or "").strip()
-    if not word:
-        return jsonify({"ok": False, "error": "missing word"}), 400
-
-    base = (RASWORD_BASE_URL or "").rstrip("/")
-    if not base:
-        return jsonify({"ok": False, "error": "RASWORD_BASE_URL 未設定"}), 500
-
-    # 1) 先檢查 rasword 是否已存在該單字
-    try:
-        check_resp = requests.post(
-            f"{base}/api/words/check",
-            json={"japanese_word": word},
-            timeout=15,
-        )
-        if check_resp.status_code == 200:
-            payload = check_resp.json()
-            if payload.get("exists"):
-                w = payload.get("word") or {}
-                brief = {
-                    "japanese_word": w.get("japanese_word") or word,
-                    "kana_form": w.get("kana_form") or "",
-                    "kanji_form": w.get("kanji_form") or "",
-                    "chinese_short": w.get("chinese_short") or "",
-                    "chinese_meaning": "",
-                }
-                return jsonify(
-                    {"ok": True, "exists": True, "created": False, "word": brief}
-                )
-    except Exception as e:
-        # 檢查失敗不致命，繼續嘗試生成
-        print(f"[raspomushi] rasword /api/words/check 失敗: {e}")
-
-    # 2) 呼叫 rasword 的 /api/generate，用 rasword 內建的 GEMINI_API_KEY
-    try:
-        gen_resp = requests.post(
-            f"{base}/api/generate",
-            json={"japanese_word": word, "api_provider": "gemini"},
-            timeout=90,
-        )
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"呼叫 rasword /api/generate 失敗: {e}"}), 502
-
-    try:
-        gen_data = gen_resp.json()
-    except Exception:
-        gen_data = {}
-
-    if not gen_resp.ok or gen_data.get("error"):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": gen_data.get("error")
-                    or f"rasword /api/generate 失敗（HTTP {gen_resp.status_code}）",
-                }
-            ),
-            502,
-        )
-
-    # 3) 將生成結果寫入 rasword 的 /api/words
-    add_payload = {
-        "japanese_word": word,
-        "part_of_speech": gen_data.get("part_of_speech", ""),
-        "sentence1": gen_data.get("sentence1", ""),
-        "sentence2": gen_data.get("sentence2", ""),
-        "chinese_meaning": gen_data.get("chinese_meaning", ""),
-        "chinese_short": gen_data.get("chinese_short", ""),
-        "jlpt_level": gen_data.get("jlpt_level", ""),
-        "kana_form": gen_data.get("kana_form", ""),
-        "kanji_form": gen_data.get("kanji_form", ""),
-        "common_form": gen_data.get("common_form", "kanji"),
-        "source": "lyrics",  # 從歌詞新增
-    }
-
-    try:
-        add_resp = requests.post(
-            f"{base}/api/words",
-            json=add_payload,
-            timeout=30,
-        )
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"呼叫 rasword /api/words 失敗: {e}"}), 502
-
-    try:
-        add_json = add_resp.json()
-    except Exception:
-        add_json = {}
-
-    if not add_resp.ok or not add_json.get("success"):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": add_json.get("error")
-                    or f"rasword /api/words 新增失敗（HTTP {add_resp.status_code}）",
-                }
-            ),
-            502,
-        )
-
-    brief = {
-        "japanese_word": word,
-        "kana_form": gen_data.get("kana_form", ""),
-        "kanji_form": gen_data.get("kanji_form", ""),
-        "chinese_short": gen_data.get("chinese_short", ""),
-        "chinese_meaning": gen_data.get("chinese_meaning", ""),
-    }
-    return jsonify({"ok": True, "exists": False, "created": True, "word": brief})
+    payload, status = add_word_via_rasword(
+        base_url=RASWORD_BASE_URL,
+        word=word,
+        source_label="lyrics",
+        log_prefix="[raspomushi]",
+    )
+    return jsonify(payload), status
 
 
 if __name__ == '__main__':
