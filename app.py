@@ -779,12 +779,26 @@ def api_rasword_add_word():
     """
     data = request.get_json() or {}
     word = (data.get("word") or "").strip()
+    lyric_id = data.get("lyric_id")
     payload, status = add_word_via_rasword(
         base_url=RASWORD_BASE_URL,
         word=word,
         source_label="lyrics",
         log_prefix="[raspomushi]",
     )
+    # 只有「本次新建單字」才累計到該首歌詞的 saved_word_count
+    if status == 200 and payload.get("ok") and payload.get("created") and lyric_id is not None:
+        try:
+            lyric_id = int(lyric_id)
+            conn = get_db()
+            conn.execute(
+                "UPDATE lyrics SET saved_word_count = saved_word_count + 1 WHERE id = ?",
+                (lyric_id,),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[raspomushi] 更新 saved_word_count 失敗 (lyric_id={lyric_id}): {e}")
     return jsonify(payload), status
 
 

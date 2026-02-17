@@ -1157,7 +1157,7 @@
                 const res = await fetch('/api/rasword/add-word', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ word: currentWord })
+                    body: JSON.stringify({ word: currentWord, lyric_id: currentLyricId })
                 });
                 const data = await res.json();
                 
@@ -1169,6 +1169,8 @@
                     } else {
                         statusEl.innerHTML = '✅ 完成';
                     }
+                    // 更新列表上的單字計數顯示
+                    loadLyricsList(document.getElementById('search-keyword').value.trim());
                 } else {
                     statusEl.innerHTML = `❌ ${data.error || '失敗'}`;
                 }
