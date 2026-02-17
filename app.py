@@ -811,11 +811,16 @@ def api_rasword_add_word():
     context_text = data.get("context_text") or ""
     context_offset = data.get("context_offset")
     sentence3 = ""
+    source_title = ""
+    source_lyric_id = None
     if lyric_id:
         try:
             conn = get_db()
-            row = conn.execute("SELECT content FROM lyrics WHERE id = ?", (int(lyric_id),)).fetchone()
+            row = conn.execute("SELECT id, title, content FROM lyrics WHERE id = ?", (int(lyric_id),)).fetchone()
             conn.close()
+            if row:
+                source_title = row["title"] or ""
+                source_lyric_id = row["id"]
             if row and row["content"]:
                 sentence3 = _extract_sentence3_from_lyrics(
                     row["content"], word, context_text=context_text, context_offset=context_offset
@@ -828,6 +833,8 @@ def api_rasword_add_word():
         source_label="lyrics",
         log_prefix="[raspomushi]",
         sentence3=sentence3,
+        source_title=source_title,
+        source_lyric_id=source_lyric_id,
     )
     # 只有「本次新建單字」才累計到該首歌詞的 saved_word_count
     if status == 200 and payload.get("ok") and payload.get("created") and lyric_id is not None:

@@ -344,6 +344,7 @@
         let currentReading = null;
         let currentContextText = '';
         let currentContextOffset = 0;
+        let currentWordStart = -1;
 
         function escapeHtml(text) {
             const div = document.createElement('div');
@@ -493,11 +494,12 @@
                     const node = range.startContainer;
                     if (!node || node.nodeType !== Node.TEXT_NODE) return;
                     
-                    const word = pickWordFromTextNode(node.textContent || '', range.startOffset);
+                    const picked = pickWordDataFromTextNode(node.textContent || '', range.startOffset);
+                    const word = picked.word;
                     if (!word) return;
                     
                     ev.stopPropagation();
-                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset);
+                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset, picked.start);
                 });
                 
                 document.getElementById('list-tab').classList.remove('active');
@@ -652,11 +654,12 @@
                     const node = range.startContainer;
                     if (!node || node.nodeType !== Node.TEXT_NODE) return;
                     
-                    const word = pickWordFromTextNode(node.textContent || '', range.startOffset);
+                    const picked = pickWordDataFromTextNode(node.textContent || '', range.startOffset);
+                    const word = picked.word;
                     if (!word) return;
                     
                     ev.stopPropagation();
-                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset);
+                    showFuriganaAt(ev.clientX, ev.clientY, word, node.textContent || '', range.startOffset, picked.start);
                 });
             });
         }
@@ -898,17 +901,9 @@
             return /[\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\u30FC\u3005]/.test(s || '');
         }
 
-        function isNoisyWord(s) {
-            const w = (s || '').trim();
-            if (!w) return true;
-            if (w.length < 2) return true;
-            const stop = new Set(['の', 'は', 'が', 'を', 'に', 'へ', 'で', 'と', 'も', 'や', 'ね', 'よ', 'な', 'か']);
-            return stop.has(w);
-        }
-        
         // 從文字節點中選取單字（跟 rasrss 一樣的邏輯）
-        function pickWordFromTextNode(text, offset) {
-            if (!text) return '';
+        function pickWordDataFromTextNode(text, offset) {
+            if (!text) return { word: '', start: -1 };
             const i = Math.min(Math.max(offset, 0), Math.max(text.length - 1, 0));
 
             // 1) 優先用瀏覽器的日文斷詞（更精確，不會一次抓一大串）
@@ -920,9 +915,10 @@
                         const end = start + part.segment.length;
                         if (i >= start && i < end) {
                             const w = (part.segment || '').trim();
-                            if (!w) return '';
-                            if (!hasJapaneseWord(w) || isNoisyWord(w)) return '';
-                            return w.length > 24 ? w.slice(0, 24) : w;
+                            if (!w) return { word: '', start: -1 };
+                            if (!hasJapaneseWord(w)) return { word: '', start: -1 };
+                            const clipped = w.length > 24 ? w.slice(0, 24) : w;
+                            return { word: clipped, start };
                         }
                     }
                 }
@@ -933,7 +929,7 @@
             // 2) fallback：簡易規則（避免一次抓到整句）
             let j = i;
             if (j > 0 && !isJapaneseChar(text[j]) && isJapaneseChar(text[j - 1])) j = j - 1;
-            if (!isJapaneseChar(text[j])) return '';
+            if (!isJapaneseChar(text[j])) return { word: '', start: -1 };
             let l = j, r = j;
             // 句讀點/空白/括號等直接截斷
             const stopRe = /[\s\u3000、。．，,\.\(\)\[\]「」『』【】＜＞<>]/;
@@ -942,8 +938,8 @@
             let w = text.slice(l, r).trim();
             // 再限縮：只保留前後最多 16 字，避免超長連續字串
             if (w.length > 16) w = w.slice(0, 16);
-            if (!hasJapaneseWord(w) || isNoisyWord(w)) return '';
-            return w;
+            if (!hasJapaneseWord(w)) return { word: '', start: -1 };
+            return { word: w, start: l };
         }
         
         // 取得點擊位置的文字範圍（跟 rasrss 一樣的邏輯）
@@ -971,12 +967,14 @@
             currentReading = null;
             currentContextText = '';
             currentContextOffset = 0;
+            currentWordStart = -1;
             furiganaPop.removeAttribute('data-mode');
         }
 
         function furiganaFirstLineHtml(word, reading, isPlaceholder) {
             const r = reading != null ? reading : (isPlaceholder ? '…' : '無');
-            const extendBtn = (currentContextText !== '' && currentContextText.length > currentContextOffset + 1)
+            const baseStart = currentWordStart >= 0 ? currentWordStart : currentContextOffset;
+            const extendBtn = (currentContextText !== '' && baseStart >= 0 && currentContextText.length > baseStart + 1)
                 ? ` <button type="button" class="furigana-extend-btn" title="試試較長範圍">&gt;</button>`
                 : '';
             return `<span class="w">${escapeHtml(word)}</span> <span class="r">(${escapeHtml(r)})</span>${extendBtn}`;
@@ -1018,12 +1016,13 @@
             furiganaPop.style.top = topPos + 'px';
         }
 
-        async function showFuriganaAt(x, y, word, contextText, contextOffset) {
+        async function showFuriganaAt(x, y, word, contextText, contextOffset, contextWordStart = -1) {
             if (!word) return;
             hideFurigana();
             currentWord = word;
             currentContextText = typeof contextText === 'string' ? contextText : '';
             currentContextOffset = typeof contextOffset === 'number' ? contextOffset : 0;
+            currentWordStart = typeof contextWordStart === 'number' ? contextWordStart : -1;
             
             // 先設置內容並顯示（使用臨時位置避免閃爍）
             furiganaPop.style.left = '-9999px';
@@ -1099,11 +1098,12 @@
         async function extendFuriganaRange() {
             if (!currentContextText || currentContextOffset < 0) return;
             const text = currentContextText;
-            const offset = currentContextOffset;
+            const offset = currentWordStart >= 0 ? currentWordStart : currentContextOffset;
             const stopRe = /[\s\u3000、。．，,\.\(\)\[\]「」『』【】＜＞<>]/;
             const maxLen = 10;
             const candidates = [];
-            for (let len = 2; len <= maxLen && offset + len <= text.length; len++) {
+            const minLen = Math.max(2, (currentWord || '').length + 1);
+            for (let len = minLen; len <= maxLen && offset + len <= text.length; len++) {
                 const sub = text.slice(offset, offset + len);
                 if (stopRe.test(sub)) break;
                 if (sub.length > (currentWord || '').length) candidates.push(sub);
