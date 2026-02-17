@@ -1157,7 +1157,12 @@
                 const res = await fetch('/api/rasword/add-word', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ word: currentWord, lyric_id: currentLyricId })
+                    body: JSON.stringify({
+                        word: currentWord,
+                        lyric_id: currentLyricId,
+                        context_text: currentContextText || '',
+                        context_offset: currentContextOffset || 0
+                    })
                 });
                 const data = await res.json();
                 

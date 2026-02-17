@@ -194,6 +194,34 @@ def segment_japanese_text(text: str) -> list:
     return segments
 
 
+def _extract_sentence3_from_lyrics(text, word, context_text="", context_offset=None):
+    """取目標詞所在行的上下文（上/中/下三行，邊界時兩行）。"""
+    if not text or not word:
+        return ""
+    lines = text.splitlines()
+    if not lines:
+        return ""
+
+    target_idx = -1
+    if context_text:
+        for i, line in enumerate(lines):
+            if context_text in line and word in line:
+                target_idx = i
+                break
+    if target_idx < 0:
+        for i, line in enumerate(lines):
+            if word in line:
+                target_idx = i
+                break
+    if target_idx < 0:
+        return ""
+
+    start = max(0, target_idx - 1)
+    end = min(len(lines), target_idx + 2)
+    snippet_lines = [ln.strip() for ln in lines[start:end] if ln.strip()]
+    return "\n".join(snippet_lines)[:500]
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -780,11 +808,26 @@ def api_rasword_add_word():
     data = request.get_json() or {}
     word = (data.get("word") or "").strip()
     lyric_id = data.get("lyric_id")
+    context_text = data.get("context_text") or ""
+    context_offset = data.get("context_offset")
+    sentence3 = ""
+    if lyric_id:
+        try:
+            conn = get_db()
+            row = conn.execute("SELECT content FROM lyrics WHERE id = ?", (int(lyric_id),)).fetchone()
+            conn.close()
+            if row and row["content"]:
+                sentence3 = _extract_sentence3_from_lyrics(
+                    row["content"], word, context_text=context_text, context_offset=context_offset
+                )
+        except Exception as e:
+            print(f"[raspomushi] 擷取 sentence3 失敗 (lyric_id={lyric_id}): {e}")
     payload, status = add_word_via_rasword(
         base_url=RASWORD_BASE_URL,
         word=word,
         source_label="lyrics",
         log_prefix="[raspomushi]",
+        sentence3=sentence3,
     )
     # 只有「本次新建單字」才累計到該首歌詞的 saved_word_count
     if status == 200 and payload.get("ok") and payload.get("created") and lyric_id is not None:
