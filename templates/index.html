@@ -894,9 +894,16 @@
             return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(c);
         }
         
-        // 判斷是否包含漢字
-        function hasKanji(s) {
-            return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(s || '');
+        function hasJapaneseWord(s) {
+            return /[\u3040-\u30FF\u3400-\u9FFF\uF900-\uFAFF\u30FC\u3005]/.test(s || '');
+        }
+
+        function isNoisyWord(s) {
+            const w = (s || '').trim();
+            if (!w) return true;
+            if (w.length < 2) return true;
+            const stop = new Set(['の', 'は', 'が', 'を', 'に', 'へ', 'で', 'と', 'も', 'や', 'ね', 'よ', 'な', 'か']);
+            return stop.has(w);
         }
         
         // 從文字節點中選取單字（跟 rasrss 一樣的邏輯）
@@ -914,7 +921,7 @@
                         if (i >= start && i < end) {
                             const w = (part.segment || '').trim();
                             if (!w) return '';
-                            if (!hasKanji(w)) return ''; // 只對「含漢字的詞」顯示讀音
+                            if (!hasJapaneseWord(w) || isNoisyWord(w)) return '';
                             return w.length > 24 ? w.slice(0, 24) : w;
                         }
                     }
@@ -935,7 +942,7 @@
             let w = text.slice(l, r).trim();
             // 再限縮：只保留前後最多 16 字，避免超長連續字串
             if (w.length > 16) w = w.slice(0, 16);
-            if (!hasKanji(w)) return '';
+            if (!hasJapaneseWord(w) || isNoisyWord(w)) return '';
             return w;
         }
         
