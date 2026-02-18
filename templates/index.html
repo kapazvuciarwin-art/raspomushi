@@ -265,6 +265,24 @@
         .furigana-extend-results { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9rem; color: #aaa; }
         .furigana-extend-results .item { margin: 4px 0; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
         .furigana-extend-results .item:hover { background: rgba(255,255,255,0.1); color: #eaeaea; }
+        .translation-switch-toast {
+            position: fixed;
+            right: 16px;
+            top: 16px;
+            z-index: 11000;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.92);
+            border: 1px solid rgba(255,255,255,0.16);
+            color: #e5e7eb;
+            font-size: 0.86rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+        }
+        .translation-switch-toast.show {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -336,6 +354,7 @@
     </div>
 
     <div id="furigana-pop" class="furigana-pop" role="status" aria-live="polite"></div>
+    <div id="translation-switch-toast" class="translation-switch-toast" aria-live="polite"></div>
 
     <script>
         const furiganaPop = document.getElementById('furigana-pop');
@@ -522,6 +541,44 @@
         
         let currentLyricId = null;
         let currentTranslation = null;
+        let translationVersions = [];
+        let currentTranslationIndex = -1;
+        let translationToastTimer = null;
+        let swipeStartX = null;
+        let swipeStartY = null;
+        const SWIPE_THRESHOLD_X = 40;
+        const SWIPE_THRESHOLD_Y = 30;
+
+        function showTranslationSwitchToast(index) {
+            if (!translationVersions.length || index < 0 || index >= translationVersions.length) return;
+            const toast = document.getElementById('translation-switch-toast');
+            const item = translationVersions[index];
+            toast.textContent = `版本 ${index + 1}/${translationVersions.length}｜${item.version_name || '未命名版本'}`;
+            toast.classList.add('show');
+            if (translationToastTimer) {
+                clearTimeout(translationToastTimer);
+            }
+            translationToastTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 900);
+        }
+
+        function switchTranslationByIndex(index, fromQuickAction = false) {
+            if (!translationVersions.length) return;
+            const normalized = ((index % translationVersions.length) + translationVersions.length) % translationVersions.length;
+            const selected = translationVersions[normalized];
+            if (!selected) return;
+            const selectEl = document.getElementById('translation-version-select');
+            selectEl.value = selected.id;
+            currentTranslationIndex = normalized;
+            loadTranslation(fromQuickAction);
+        }
+
+        function switchTranslationByStep(step) {
+            if (!translationVersions.length) return;
+            const base = currentTranslationIndex >= 0 ? currentTranslationIndex : 0;
+            switchTranslationByIndex(base + step, true);
+        }
         
         async function loadTranslationVersions() {
             if (!currentLyricId) return;
@@ -529,18 +586,21 @@
             try {
                 const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
                 const translations = await res.json();
+                translationVersions = Array.isArray(translations) ? translations : [];
+                currentTranslationIndex = -1;
                 
                 const selectEl = document.getElementById('translation-version-select');
                 selectEl.innerHTML = '<option value="">-- 選擇版本 --</option>';
                 
                 const translateBtn = document.getElementById('translate-btn');
                 
-                if (translations.length > 0) {
+                if (translationVersions.length > 0) {
                     document.getElementById('translation-versions').style.display = 'block';
-                    translations.forEach(t => {
+                    translationVersions.forEach((t, idx) => {
                         const option = document.createElement('option');
                         option.value = t.id;
                         option.textContent = `${t.version_name} (${new Date(t.created_at).toLocaleString('zh-TW')})`;
+                        option.dataset.index = String(idx);
                         selectEl.appendChild(option);
                     });
                     // 如果有翻譯，將「翻譯」按鈕改為「再翻譯」
@@ -555,25 +615,34 @@
             }
         }
         
-        async function loadTranslation() {
+        async function loadTranslation(fromQuickAction = false) {
             const translationId = document.getElementById('translation-version-select').value;
             if (!translationId) {
                 document.getElementById('translation-content').style.display = 'none';
                 currentTranslation = null;
+                currentTranslationIndex = -1;
                 return;
             }
             
             try {
-                const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
-                const translations = await res.json();
-                const translation = translations.find(t => t.id == translationId);
+                let translation = translationVersions.find(t => t.id == translationId);
+                if (!translation) {
+                    const res = await fetch(`/api/lyrics/${currentLyricId}/translations`);
+                    const latest = await res.json();
+                    translationVersions = Array.isArray(latest) ? latest : [];
+                    translation = translationVersions.find(t => t.id == translationId);
+                }
                 
                 if (translation) {
                     currentTranslation = translation;
+                    currentTranslationIndex = translationVersions.findIndex(t => t.id == translation.id);
                     renderTranslation(translation.translation_data, translation.model_used || '');
                     document.getElementById('translation-content').style.display = 'block';
                     // 記錄這次查看的翻譯版本
                     localStorage.setItem(`lastTranslation_${currentLyricId}`, translation.id);
+                    if (fromQuickAction && currentTranslationIndex >= 0) {
+                        showTranslationSwitchToast(currentTranslationIndex);
+                    }
                 }
             } catch (e) {
                 console.error('載入翻譯失敗:', e);
@@ -738,6 +807,8 @@
                 
                 // 載入並顯示翻譯
                 currentTranslation = selectedTranslation;
+                translationVersions = Array.isArray(translations) ? translations : [];
+                currentTranslationIndex = translationVersions.findIndex(t => t.id == selectedTranslation.id);
                 renderTranslation(selectedTranslation.translation_data, selectedTranslation.model_used || '');
                 document.getElementById('translation-content').style.display = 'block';
                 document.getElementById('translation-versions').style.display = 'block';
@@ -1275,6 +1346,67 @@
                 handleInitialRoute();
             });
         });
+
+        document.addEventListener('keydown', (event) => {
+            const detailVisible = document.getElementById('lyric-detail-card').style.display !== 'none';
+            if (!detailVisible || !translationVersions.length) return;
+
+            const target = event.target;
+            const isTypingTarget = target && (
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.isContentEditable
+            );
+            if (isTypingTarget) return;
+
+            if (event.key === '[') {
+                event.preventDefault();
+                switchTranslationByStep(-1);
+                return;
+            }
+            if (event.key === ']') {
+                event.preventDefault();
+                switchTranslationByStep(1);
+                return;
+            }
+            if (/^[1-9]$/.test(event.key)) {
+                const index = Number(event.key) - 1;
+                if (index < translationVersions.length) {
+                    event.preventDefault();
+                    switchTranslationByIndex(index, true);
+                }
+            }
+        });
+
+        const lyricDetailCard = document.getElementById('lyric-detail-card');
+        lyricDetailCard.addEventListener('touchstart', (event) => {
+            if (!translationVersions.length) return;
+            const target = event.target;
+            const inReadableArea = target.closest('#lyric-detail-content') || target.closest('#translation-content');
+            if (!inReadableArea) return;
+            const t = event.changedTouches[0];
+            swipeStartX = t.clientX;
+            swipeStartY = t.clientY;
+        }, { passive: true });
+
+        lyricDetailCard.addEventListener('touchend', (event) => {
+            if (!translationVersions.length || swipeStartX === null || swipeStartY === null) return;
+            const t = event.changedTouches[0];
+            const dx = t.clientX - swipeStartX;
+            const dy = t.clientY - swipeStartY;
+            swipeStartX = null;
+            swipeStartY = null;
+
+            if (Math.abs(dx) < SWIPE_THRESHOLD_X) return;
+            if (Math.abs(dy) > SWIPE_THRESHOLD_Y) return;
+            if (Math.abs(dy) > Math.abs(dx) * 0.9) return;
+
+            if (dx < 0) {
+                switchTranslationByStep(1);
+            } else {
+                switchTranslationByStep(-1);
+            }
+        }, { passive: true });
 
         (function renderMyrasQuickNav() {
             const mount = document.getElementById('myras-quick-nav');
